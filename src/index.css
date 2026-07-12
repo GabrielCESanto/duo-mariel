@@ -1,0 +1,123 @@
+@import "tailwindcss";
+
+@theme {
+  /* Paleta extraída da logo: preto quente + dourado-cobre */
+  --color-noir-950: #0b0908;
+  --color-noir-900: #14100d;
+  --color-noir-800: #1f1913;
+  --color-noir-700: #33291f;
+  --color-noir-600: #4d3f30;
+
+  --color-gold-200: #ecd9b4;
+  --color-gold-300: #e0c391;
+  --color-gold-400: #d4ad74;
+  --color-gold-500: #c1965c;
+  --color-gold-600: #a37a45;
+  --color-gold-700: #7d5c33;
+
+  --color-cream: #f3ede3;
+  --color-cream-muted: #a79885;
+
+  --font-display: "Cinzel", "Times New Roman", serif;
+  --font-sans: "Jost", "Segoe UI", system-ui, sans-serif;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--color-noir-950);
+  color: var(--color-cream);
+  font-family: var(--font-sans);
+  font-weight: 300;
+}
+
+::selection {
+  background-color: var(--color-gold-500);
+  color: var(--color-noir-950);
+}
+
+/* Scrollbar discreta no tom da identidade */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-noir-700) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: var(--color-noir-700);
+  border-radius: 4px;
+}
+
+/* Título de seção no estilo da logo */
+.section-title {
+  font-family: var(--font-display);
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--color-gold-300);
+}
+
+/* Linha decorativa dourada */
+.gold-rule {
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--color-gold-500) 50%,
+    transparent
+  );
+}
+
+/* Botão principal dourado */
+.btn-gold {
+  background: linear-gradient(135deg, #d9b380, #b08652 60%, #8c6a3f);
+  color: #14100d;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  transition: filter 0.2s ease, transform 0.1s ease;
+}
+.btn-gold:hover:not(:disabled) {
+  filter: brightness(1.12);
+}
+.btn-gold:active:not(:disabled) {
+  transform: scale(0.98);
+}
+.btn-gold:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* Inputs padrão */
+.input-noir {
+  width: 100%;
+  border-radius: 0.75rem;
+  background-color: var(--color-noir-900);
+  border: 1px solid var(--color-noir-700);
+  padding: 0.75rem 1rem;
+  outline: none;
+  transition: border-color 0.2s ease;
+  color: var(--color-cream);
+}
+.input-noir::placeholder {
+  color: var(--color-cream-muted);
+  opacity: 0.7;
+}
+.input-noir:focus {
+  border-color: var(--color-gold-500);
+}
+
+/* Fade suave nas bordas da logo (funde a textura da foto com o fundo) */
+.logo-blend {
+  -webkit-mask-image: radial-gradient(
+    ellipse 72% 68% at center,
+    black 52%,
+    transparent 98%
+  );
+  mask-image: radial-gradient(
+    ellipse 72% 68% at center,
+    black 52%,
+    transparent 98%
+  );
+}
