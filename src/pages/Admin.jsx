@@ -145,6 +145,21 @@ function Login() {
 
 function Painel() {
   const [aba, setAba] = useState("musicas");
+  const [pendentes, setPendentes] = useState(0);
+
+  const contarPendentes = async () => {
+    const { count, error } = await supabase
+      .from("pedidos")
+      .select("*", { count: "exact", head: true })
+      .eq("atendido", false);
+    if (!error) setPendentes(count ?? 0);
+  };
+
+  useEffect(() => {
+    contarPendentes();
+    const timer = setInterval(contarPendentes, 60_000);
+    return () => clearInterval(timer);
+  }, []);
 
   return (
     <div>
@@ -166,6 +181,11 @@ function Painel() {
         </AbaBotao>
         <AbaBotao ativa={aba === "pedidos"} onClick={() => setAba("pedidos")}>
           Pedidos
+          {pendentes > 0 && (
+            <span className="ml-2 inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full bg-gold-500 text-noir-900 text-[11px] font-semibold align-middle">
+              {pendentes}
+            </span>
+          )}
         </AbaBotao>
         {GOATCOUNTER_CODE && (
           <AbaBotao ativa={aba === "acessos"} onClick={() => setAba("acessos")}>
@@ -179,7 +199,7 @@ function Painel() {
       {aba === "aprender" && <GerenciarSugestoes />}
       {aba === "agenda" && <GerenciarAgenda />}
       {aba === "videos" && <GerenciarVideos />}
-      {aba === "pedidos" && <GerenciarPedidos />}
+      {aba === "pedidos" && <GerenciarPedidos onMudanca={contarPendentes} />}
       {aba === "acessos" && <AbaAcessos />}
     </div>
   );
@@ -1330,7 +1350,7 @@ function AbaAcessos() {
 
 /* ------------------------- PEDIDOS ------------------------- */
 
-function GerenciarPedidos() {
+function GerenciarPedidos({ onMudanca }) {
   const [pedidos, setPedidos] = useState([]);
   const [carregando, setCarregando] = useState(true);
 
@@ -1343,6 +1363,7 @@ function GerenciarPedidos() {
       .limit(100);
     if (!error) setPedidos(data ?? []);
     setCarregando(false);
+    onMudanca?.();
   };
 
   useEffect(() => {
