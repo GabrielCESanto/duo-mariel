@@ -36,6 +36,10 @@ export default function Cifra() {
       return;
     }
     supabase.auth.getSession().then(({ data }) => setSessao(data.session));
+
+    // Pede ao sistema para NÃO descartar o cache das cifras
+    // quando o dispositivo precisar liberar espaço
+    navigator.storage?.persist?.().catch(() => {});
   }, []);
 
   // --- Carrega música + PDF ---
