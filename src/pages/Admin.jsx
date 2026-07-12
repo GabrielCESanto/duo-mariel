@@ -363,6 +363,22 @@ function GerenciarMusicas() {
     return `${m.nome} ${m.artista} ${m.estilo ?? ""}`.toLowerCase().includes(q);
   });
 
+  const baixarXlsx = async () => {
+    // Biblioteca só é baixada quando o botão é usado
+    const XLSX = await import("xlsx");
+    const dados = musicas.map((m) => ({
+      "Música": m.nome,
+      "Artista": m.artista,
+      "Estilo": m.estilo ?? "",
+      "Cifra": m.cifra_path ? "Sim" : "",
+    }));
+    const ws = XLSX.utils.json_to_sheet(dados);
+    ws["!cols"] = [{ wch: 40 }, { wch: 30 }, { wch: 16 }, { wch: 8 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Repertório");
+    XLSX.writeFile(wb, "repertorio-duo-mariel.xlsx");
+  };
+
   return (
     <div>
       {/* Formulário */}
@@ -478,6 +494,13 @@ function GerenciarMusicas() {
           <h2 className="section-title text-sm">
             Repertório ({musicas.length})
           </h2>
+          <button
+            onClick={baixarXlsx}
+            disabled={musicas.length === 0}
+            className="px-3 py-1.5 rounded-lg border border-noir-700 text-xs text-cream-muted hover:text-gold-300 hover:border-gold-600 transition disabled:opacity-40"
+          >
+            ⬇ Baixar repertório (xlsx)
+          </button>
         </div>
 
         <input
