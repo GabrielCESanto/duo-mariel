@@ -130,12 +130,20 @@ export default function Cifra() {
   useEffect(() => {
     let rafId;
     let ultimoT = null;
+    // Acumula frações de pixel: em velocidades baixas o avanço por quadro
+    // é < 1px e seria perdido no arredondamento do scrollTop
+    let acumulado = 0;
 
     const passo = (t) => {
       if (ultimoT !== null && rodandoRef.current && scrollRef.current) {
         const dt = (t - ultimoT) / 1000;
         const el = scrollRef.current;
-        el.scrollTop += velocidadeRef.current * dt;
+        acumulado += velocidadeRef.current * dt;
+        const inteiro = Math.floor(acumulado);
+        if (inteiro >= 1) {
+          el.scrollTop += inteiro;
+          acumulado -= inteiro;
+        }
         // Chegou ao fim → pausa
         if (el.scrollTop + el.clientHeight >= el.scrollHeight - 2) {
           setRodando(false);
@@ -146,6 +154,21 @@ export default function Cifra() {
     };
     rafId = requestAnimationFrame(passo);
     return () => cancelAnimationFrame(rafId);
+  }, []);
+
+  // --- Bloqueia o zoom de pinça (o zoom é pelos botões A− / A+) ---
+  // Sem isso, o zoom do navegador amplia a página toda e os controles
+  // somem da tela
+  useEffect(() => {
+    const meta = document.querySelector('meta[name="viewport"]');
+    const original = meta?.getAttribute("content");
+    meta?.setAttribute(
+      "content",
+      "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
+    );
+    return () => {
+      if (meta && original) meta.setAttribute("content", original);
+    };
   }, []);
 
   // --- Tela sempre acesa enquanto rola (tablets) ---
@@ -251,6 +274,7 @@ export default function Cifra() {
         ref={scrollRef}
         onClick={() => !erro && setRodando((r) => !r)}
         className="flex-1 overflow-y-auto bg-noir-950 px-2 py-3 cursor-pointer"
+        style={{ touchAction: "pan-y" }}
       >
         {erro ? (
           <p className="text-cream-muted text-center py-16">{erro}</p>
