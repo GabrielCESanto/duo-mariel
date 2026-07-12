@@ -41,24 +41,12 @@ export default function Admin() {
           </Link>
 
           {sessao && (
-            <div className="flex items-center gap-4">
-              {GOATCOUNTER_CODE && (
-                <a
-                  href={`https://${GOATCOUNTER_CODE}.goatcounter.com`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-xs text-cream-muted hover:text-gold-300 transition"
-                >
-                  📊 Acessos
-                </a>
-              )}
-              <button
-                onClick={() => supabase.auth.signOut()}
-                className="text-xs text-cream-muted hover:text-gold-300 transition"
-              >
-                Sair
-              </button>
-            </div>
+            <button
+              onClick={() => supabase.auth.signOut()}
+              className="text-xs text-cream-muted hover:text-gold-300 transition"
+            >
+              Sair
+            </button>
           )}
         </header>
 
