@@ -179,6 +179,11 @@ function Painel() {
         <AbaBotao ativa={aba === "pedidos"} onClick={() => setAba("pedidos")}>
           Pedidos
         </AbaBotao>
+        {GOATCOUNTER_CODE && (
+          <AbaBotao ativa={aba === "acessos"} onClick={() => setAba("acessos")}>
+            Acessos
+          </AbaBotao>
+        )}
       </div>
 
       {aba === "musicas" && <GerenciarMusicas />}
@@ -187,6 +192,7 @@ function Painel() {
       {aba === "agenda" && <GerenciarAgenda />}
       {aba === "videos" && <GerenciarVideos />}
       {aba === "pedidos" && <GerenciarPedidos />}
+      {aba === "acessos" && <AbaAcessos />}
     </div>
   );
 }
@@ -1209,6 +1215,126 @@ function GerenciarVideos() {
           </ul>
         )}
       </div>
+    </div>
+  );
+}
+
+/* ------------------------- ACESSOS ------------------------- */
+
+const dataIso = (diasAtras = 0) => {
+  const d = new Date();
+  d.setDate(d.getDate() - diasAtras);
+  return d.toISOString().slice(0, 10);
+};
+
+// Endpoint público de contador do GoatCounter (sem chave/senha)
+async function contarAcessos(caminho, inicio) {
+  try {
+    const url =
+      `https://${GOATCOUNTER_CODE}.goatcounter.com/counter/` +
+      `${encodeURIComponent(caminho)}.json?start=${inicio}&end=${dataIso()}`;
+    const resp = await fetch(url);
+    if (!resp.ok) return null;
+    const json = await resp.json();
+    // "count" vem formatado como texto (ex.: "1 234")
+    const n = parseInt(String(json.count).replace(/\D/g, ""), 10);
+    return Number.isNaN(n) ? 0 : n;
+  } catch {
+    return null;
+  }
+}
+
+function AbaAcessos() {
+  const [dados, setDados] = useState(null);
+  const [erro, setErro] = useState(false);
+
+  const carregar = async () => {
+    setDados(null);
+    setErro(false);
+    const periodos = [
+      ["hoje", dataIso(0)],
+      ["7 dias", dataIso(6)],
+      ["30 dias", dataIso(29)],
+    ];
+    const resultado = [];
+    for (const [rotulo, inicio] of periodos) {
+      const publico = await contarAcessos("/", inicio);
+      const admin = await contarAcessos("/admin", inicio);
+      resultado.push({ rotulo, publico, admin });
+    }
+    if (resultado.every((r) => r.publico === null && r.admin === null)) {
+      setErro(true);
+      return;
+    }
+    setDados(resultado);
+  };
+
+  useEffect(() => {
+    carregar();
+  }, []);
+
+  return (
+    <div className="border border-noir-700 rounded-2xl p-5 bg-noir-900/50">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="section-title text-sm">Visitas ao site</h2>
+        <div className="flex gap-4">
+          <button
+            onClick={carregar}
+            className="text-xs text-cream-muted hover:text-gold-300 transition"
+          >
+            ↻ Atualizar
+          </button>
+          <a
+            href={`https://${GOATCOUNTER_CODE}.goatcounter.com`}
+            target="_blank"
+            rel="noreferrer"
+            className="text-xs text-cream-muted hover:text-gold-300 transition"
+          >
+            Painel completo ›
+          </a>
+        </div>
+      </div>
+
+      {erro ? (
+        <p className="text-cream-muted text-sm py-4">
+          Não foi possível carregar os números agora. Veja no{" "}
+          <a
+            href={`https://${GOATCOUNTER_CODE}.goatcounter.com`}
+            target="_blank"
+            rel="noreferrer"
+            className="text-gold-300 hover:underline"
+          >
+            painel do GoatCounter
+          </a>
+          .
+        </p>
+      ) : !dados ? (
+        <p className="text-cream-muted text-sm py-4">Carregando...</p>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-3">
+          {dados.map((d) => (
+            <div
+              key={d.rotulo}
+              className="border border-noir-700 rounded-xl p-4 text-center"
+            >
+              <p className="text-[10px] uppercase tracking-wider text-cream-muted mb-2">
+                {d.rotulo}
+              </p>
+              <p className="text-3xl font-display text-gold-300">
+                {d.publico ?? "—"}
+              </p>
+              <p className="text-xs text-cream-muted mt-1">visitas ao site</p>
+              <p className="text-cream-muted/60 text-[11px] mt-2">
+                área do músico: {d.admin ?? "—"}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <p className="text-cream-muted/60 text-[11px] mt-4">
+        Visitantes únicos por período, contados pelo GoatCounter (sem cookies).
+      </p>
     </div>
   );
 }

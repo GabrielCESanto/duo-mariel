@@ -89,27 +89,49 @@ export default function Cifra() {
   }, [sessao, id]);
 
   // --- Renderiza as páginas no zoom atual ---
+  const renderIdRef = useRef(0);
   const renderizar = async (doc, escala) => {
     const container = paginasRef.current;
     if (!container) return;
+    const meuRender = ++renderIdRef.current; // cancela renders anteriores
     setRenderizando(true);
     container.innerHTML = "";
 
-    const larguraCss = Math.min(container.clientWidth, 1000) * escala;
+    const larguraCss =
+      Math.min(container.clientWidth || window.innerWidth, 1000) * escala;
     const dpr = window.devicePixelRatio || 1;
 
     for (let i = 1; i <= doc.numPages; i++) {
+      if (renderIdRef.current !== meuRender) return;
       const pagina = await doc.getPage(i);
       const base = pagina.getViewport({ scale: 1 });
       const fator = larguraCss / base.width;
-      const viewport = pagina.getViewport({ scale: fator * dpr });
+
+      // Tablets têm limite de tamanho de canvas — acima disso a página
+      // sai em branco. Reduz a resolução interna mantendo o tamanho visual.
+      let escalaRender = fator * dpr;
+      const MAX_PIXELS = 12_000_000;
+      const MAX_DIMENSAO = 4096;
+      const pixels = base.width * escalaRender * (base.height * escalaRender);
+      if (pixels > MAX_PIXELS) {
+        escalaRender *= Math.sqrt(MAX_PIXELS / pixels);
+      }
+      const maiorLado = Math.max(base.width, base.height) * escalaRender;
+      if (maiorLado > MAX_DIMENSAO) {
+        escalaRender *= MAX_DIMENSAO / maiorLado;
+      }
+
+      const viewport = pagina.getViewport({ scale: escalaRender });
+      const alturaCss = (base.height / base.width) * larguraCss;
 
       const canvas = document.createElement("canvas");
       canvas.width = viewport.width;
       canvas.height = viewport.height;
       canvas.style.width = `${larguraCss}px`;
-      canvas.style.height = `${viewport.height / dpr}px`;
+      canvas.style.height = `${alturaCss}px`;
       canvas.className = "mx-auto block mb-2 rounded-lg";
+
+      if (renderIdRef.current !== meuRender) return;
       container.appendChild(canvas);
 
       await pagina.render({
@@ -117,7 +139,7 @@ export default function Cifra() {
         viewport,
       }).promise;
     }
-    setRenderizando(false);
+    if (renderIdRef.current === meuRender) setRenderizando(false);
   };
 
   // --- Zoom re-renderiza ---
@@ -273,8 +295,8 @@ export default function Cifra() {
       <div
         ref={scrollRef}
         onClick={() => !erro && setRodando((r) => !r)}
-        className="flex-1 overflow-y-auto bg-noir-950 px-2 py-3 cursor-pointer"
-        style={{ touchAction: "pan-y" }}
+        className="flex-1 overflow-auto bg-noir-950 px-2 py-3 cursor-pointer"
+        style={{ touchAction: "pan-x pan-y" }}
       >
         {erro ? (
           <p className="text-cream-muted text-center py-16">{erro}</p>
