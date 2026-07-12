@@ -19,7 +19,66 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { pedido, mensagem } = await req.json();
+    const body = await req.json();
+    const tipo = body.tipo === "aprender" ? "aprender" : "pedido";
+
+    // Cliente com service role — ignora RLS
+    const supabase = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+    );
+
+    const TOKEN = Deno.env.get("TELEGRAM_TOKEN");
+    const CHAT_ID = Deno.env.get("TELEGRAM_CHAT_ID");
+    const notificar = async (texto: string) => {
+      if (!TOKEN || !CHAT_ID) return;
+      await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: CHAT_ID, text: texto }),
+      });
+    };
+
+    if (tipo === "aprender") {
+      // Sugestão de música para o duo aprender
+      const { musica, artista, mensagem } = body;
+
+      if (typeof musica !== "string" || !musica.trim()) {
+        return json({ error: "Música vazia" }, 400);
+      }
+      if (
+        musica.length > 200 ||
+        (artista && String(artista).length > 120) ||
+        (mensagem && String(mensagem).length > 300)
+      ) {
+        return json({ error: "Texto muito longo" }, 400);
+      }
+
+      const registro = {
+        musica: musica.trim(),
+        artista: artista ? String(artista).trim() : null,
+        mensagem: mensagem ? String(mensagem).trim() : null,
+        origem: "visitante",
+      };
+
+      const { error: dbError } = await supabase
+        .from("sugestoes")
+        .insert(registro);
+
+      if (dbError) console.error("Erro ao salvar sugestão:", dbError);
+
+      await notificar(
+        `🎸 SUGESTÃO PARA APRENDER — DUO MARIEL\n\n` +
+          `Música: ${registro.musica}\n` +
+          `Artista: ${registro.artista || "—"}\n\n` +
+          `Mensagem:\n${registro.mensagem || "—"}`
+      );
+
+      return json({ ok: true });
+    }
+
+    // Pedido de música (fluxo original)
+    const { pedido, mensagem } = body;
 
     // Validação básica anti-abuso
     if (typeof pedido !== "string" || !pedido.trim()) {
@@ -32,34 +91,17 @@ Deno.serve(async (req) => {
     const pedidoLimpo = pedido.trim();
     const mensagemLimpa = mensagem ? String(mensagem).trim() : null;
 
-    // 1) Salva no banco (service role — ignora RLS)
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
-
     const { error: dbError } = await supabase
       .from("pedidos")
       .insert({ pedido: pedidoLimpo, mensagem: mensagemLimpa });
 
     if (dbError) console.error("Erro ao salvar pedido:", dbError);
 
-    // 2) Notifica no Telegram
-    const TOKEN = Deno.env.get("TELEGRAM_TOKEN");
-    const CHAT_ID = Deno.env.get("TELEGRAM_CHAT_ID");
-
-    if (TOKEN && CHAT_ID) {
-      const texto =
-        `🎵 NOVO PEDIDO — DUO MARIEL\n\n` +
+    await notificar(
+      `🎵 NOVO PEDIDO — DUO MARIEL\n\n` +
         `Pedido: ${pedidoLimpo}\n\n` +
-        `Mensagem:\n${mensagemLimpa || "—"}`;
-
-      await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chat_id: CHAT_ID, text: texto }),
-      });
-    }
+        `Mensagem:\n${mensagemLimpa || "—"}`
+    );
 
     return json({ ok: true });
   } catch (e) {

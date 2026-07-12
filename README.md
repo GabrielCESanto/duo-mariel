@@ -9,11 +9,28 @@ Edge Function) + GitHub Pages (hospedagem gratuita).
 ## Funcionalidades
 
 - **Página pública:** hero com a logo, repertório com busca e filtros
-  (artista/estilo), pedido de música livre ou da lista, vídeos, sobre o duo.
+  (artista/estilo), pedido de música livre ou da lista, vídeos (gerenciados
+  pela aba **Vídeos** da área admin), sobre o duo.
 - **Pedidos:** salvos no banco e notificados em tempo real no **Telegram**.
+- **Sugestões de músicas ("para aprender"):** quem não encontra a música no
+  repertório pode sugerir que o duo aprenda; a sugestão cai na aba **Aprender**
+  da área admin (com notificação no Telegram) e, quando aprendida, vira item
+  do repertório com um clique.
+- **Agenda de shows:** lista de próximos shows na página pública, gerenciada
+  pela aba **Agenda** da área admin (com cachê e tempo de apresentação
+  visíveis só para o duo).
 - **Área do músico** (`/#/admin`): login restrito (Supabase Auth) para você e
   sua parceira adicionarem/editarem/excluírem músicas e gerenciarem pedidos —
   sem precisar mexer em código nem rebuildar o site.
+- **Cifras com rolagem automática:** cada música pode ter um PDF de cifra
+  (upload na aba Músicas do admin, salvo no Supabase Storage). O visualizador
+  próprio (`/#/cifra/<id>`) rola sozinho em velocidade ajustável, com
+  play/pause por toque, zoom, suporte a pedal Bluetooth (PageUp/PageDown) e
+  tela sempre acesa — feito para tablet no palco.
+- **PWA / offline:** o site pode ser instalado na tela inicial do tablet e as
+  cifras já abertas ficam em cache — funcionam sem internet no show.
+- **Trecho de 30s no repertório:** botão ▶ em cada música da lista pública
+  toca o preview oficial via iTunes Search API (grátis, sem chave).
 - **Modo demonstração:** sem Supabase configurado, o site roda com um
   repertório local de exemplo (bom para desenvolver o visual).
 
@@ -91,6 +108,8 @@ npm run dev
 - **"Tocando agora" / fila de pedidos ao vivo** usando Supabase Realtime.
 - **Domínio próprio** (ex.: `duomariel.com.br`, ~R$40/ano no Registro.br) —
   GitHub Pages aceita domínio customizado com HTTPS grátis.
-- **Fotos/agenda de shows** em uma tabela `eventos` gerenciada pela área admin.
-- **Analytics leve** (ex.: [GoatCounter](https://www.goatcounter.com/), grátis)
-  para saber quantas pessoas acessam durante os shows.
+- **Fotos dos shows** (a agenda em tabela `eventos` já foi implementada ✅).
+- ~~**Analytics leve**~~ ✅ implementado com [GoatCounter](https://www.goatcounter.com/):
+  crie a conta grátis, defina o código do site e preencha `GOATCOUNTER_CODE`
+  no [`src/config.js`](src/config.js). O painel mostra visitas por página
+  (home e admin separadas) sem cookies e sem banner de consentimento.

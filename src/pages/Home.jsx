@@ -1,20 +1,63 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { buscarPreview } from "../lib/preview";
 import { Link } from "react-router-dom";
-import { TAGLINE, VIDEOS, SOBRE } from "../config";
+import { TAGLINE, SOBRE } from "../config";
 import { useMusicas } from "../hooks/useMusicas";
+import { useVideos } from "../hooks/useVideos";
 import SocialLinks from "../components/SocialLinks";
 import PedidoModal from "../components/PedidoModal";
+import SugestaoModal from "../components/SugestaoModal";
+import Agenda from "../components/Agenda";
 
 const BASE = import.meta.env.BASE_URL;
 
 export default function Home() {
   const { musicas, carregando } = useMusicas();
+  const { videos } = useVideos();
 
   const [pedidoLivre, setPedidoLivre] = useState("");
   const [busca, setBusca] = useState("");
   const [filtroArtista, setFiltroArtista] = useState("Todos");
   const [filtroEstilo, setFiltroEstilo] = useState("Todos");
   const [pedidoAtual, setPedidoAtual] = useState(null);
+  const [sugestaoAberta, setSugestaoAberta] = useState(false);
+
+  // --- Preview de 30s (iTunes) ---
+  const audioRef = useRef(null);
+  const [previewId, setPreviewId] = useState(null); // música tocando
+  const [previewBuscandoId, setPreviewBuscandoId] = useState(null);
+  const [semPreview, setSemPreview] = useState(() => new Set());
+
+  const pararPreview = () => {
+    audioRef.current?.pause();
+    audioRef.current = null;
+    setPreviewId(null);
+  };
+
+  useEffect(() => pararPreview, []); // para o áudio ao sair da página
+
+  const alternarPreview = async (m) => {
+    if (previewId === m.id) {
+      pararPreview();
+      return;
+    }
+    pararPreview();
+    setPreviewBuscandoId(m.id);
+
+    const url = await buscarPreview(m.nome, m.artista);
+    setPreviewBuscandoId(null);
+
+    if (!url) {
+      setSemPreview((s) => new Set(s).add(m.id));
+      return;
+    }
+
+    const audio = new Audio(url);
+    audio.addEventListener("ended", () => setPreviewId(null));
+    audioRef.current = audio;
+    setPreviewId(m.id);
+    audio.play().catch(() => setPreviewId(null));
+  };
 
   const artistas = useMemo(() => {
     const set = new Set(musicas.map((m) => m.artista).filter(Boolean));
@@ -144,8 +187,26 @@ export default function Home() {
 
           <ul className="mt-2 divide-y divide-noir-800 max-h-[420px] overflow-y-auto pr-2">
             {resultados.map((m) => (
-              <li key={m.id} className="py-3 flex items-center justify-between gap-4">
-                <div className="min-w-0">
+              <li key={m.id} className="py-3 flex items-center justify-between gap-3">
+                {!semPreview.has(m.id) && (
+                  <button
+                    onClick={() => alternarPreview(m)}
+                    aria-label={previewId === m.id ? "Parar trecho" : "Ouvir trecho"}
+                    title="Ouvir um trecho de 30s"
+                    className={`shrink-0 w-9 h-9 rounded-full border text-sm transition ${
+                      previewId === m.id
+                        ? "btn-gold border-transparent"
+                        : "border-noir-700 text-gold-300 hover:border-gold-500"
+                    }`}
+                  >
+                    {previewBuscandoId === m.id
+                      ? "⏳"
+                      : previewId === m.id
+                        ? "❚❚"
+                        : "▶"}
+                  </button>
+                )}
+                <div className="min-w-0 flex-1">
                   <p className="font-normal text-cream truncate">{m.nome}</p>
                   <p className="text-cream-muted text-sm truncate">
                     {m.artista}
@@ -163,35 +224,44 @@ export default function Home() {
 
             {!carregando && resultados.length === 0 && (
               <li className="py-6 text-cream-muted text-sm">
-                Nada encontrado. Tente outro termo — ou peça na caixa acima! 🙂
+                <p>Nada encontrado. Tente outro termo — ou peça na caixa acima! 🙂</p>
+                <button
+                  onClick={() => setSugestaoAberta(true)}
+                  className="mt-3 px-4 py-2 rounded-xl border border-gold-600 text-gold-300 hover:bg-noir-800 transition text-sm"
+                >
+                  🎸 Sugerir essa música para o repertório
+                </button>
               </li>
             )}
           </ul>
         </section>
 
         {/* VÍDEOS */}
-        {VIDEOS.length > 0 && (
+        {videos.length > 0 && (
           <section className="mt-10">
             <h2 className="section-title text-lg mb-4">Vídeos</h2>
             <div className="grid sm:grid-cols-2 gap-4">
-              {VIDEOS.slice(0, 4).map((v) => (
+              {videos.map((v) => (
                 <div
-                  key={v.youtubeId}
+                  key={v.id}
                   className="rounded-2xl overflow-hidden border border-noir-700 bg-noir-900/40"
                 >
                   <iframe
                     loading="lazy"
                     className="w-full aspect-video"
-                    src={`https://www.youtube.com/embed/${v.youtubeId}`}
-                    title={v.title}
+                    src={`https://www.youtube.com/embed/${v.youtube_id}`}
+                    title={v.titulo}
                     allowFullScreen
                   />
-                  <p className="p-3 text-center text-sm text-cream-muted">{v.title}</p>
+                  <p className="p-3 text-center text-sm text-cream-muted">{v.titulo}</p>
                 </div>
               ))}
             </div>
           </section>
         )}
+
+        {/* AGENDA */}
+        <Agenda />
 
         {/* SOBRE */}
         <section className="border border-noir-700 rounded-2xl p-6 mt-10 bg-noir-900/50">
@@ -216,6 +286,11 @@ export default function Home() {
       </div>
 
       <PedidoModal pedido={pedidoAtual} onFechar={() => setPedidoAtual(null)} />
+      <SugestaoModal
+        aberto={sugestaoAberta}
+        musicaInicial={busca.trim()}
+        onFechar={() => setSugestaoAberta(false)}
+      />
     </div>
   );
 }

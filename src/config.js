@@ -1,11 +1,22 @@
 // ⚙️ Ajustes rápidos do site — edite aqui sem mexer nos componentes
 
-export const INSTAGRAM_URL = "https://instagram.com/duomariel"; // TODO: ajustar
-export const WHATSAPP_URL = "https://wa.me/5543996316782"; // TODO: ajustar
+export const INSTAGRAM_URL = "https://instagram.com/duo.mariel";
+
+// Código do GoatCounter (analytics). Crie uma conta grátis em goatcounter.com;
+// se o seu painel for https://duomariel.goatcounter.com, o código é "duomariel".
+// Deixe "" para desativar.
+export const GOATCOUNTER_CODE = "duo-mariel";
+
+// Contatos do WhatsApp — o visitante escolhe com quem falar
+export const WHATSAPP_CONTATOS = [
+  { nome: "Mari", numero: "5543999688120" },
+  { nome: "Gabs", numero: "5543996316782" },
+];
 
 export const TAGLINE = "Voz e violão para momentos inesquecíveis";
 
-// Vídeos do YouTube exibidos na página (deixe [] para ocultar a seção)
+// Vídeos usados APENAS no modo demonstração (sem Supabase).
+// Com o Supabase configurado, os vídeos são gerenciados na aba Vídeos do admin.
 export const VIDEOS = [
   // { title: "NOME DA MÚSICA - ARTISTA", youtubeId: "XXXXXXXXXXX" },
 ];

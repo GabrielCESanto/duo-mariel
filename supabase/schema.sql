@@ -64,6 +64,140 @@ create policy "pedidos: delete autenticado"
   to authenticated
   using (true);
 
+-- ---------- TABELA: sugestoes (músicas para aprender) ----------
+create table if not exists public.sugestoes (
+  id uuid primary key default gen_random_uuid(),
+  musica text not null,
+  artista text,
+  mensagem text,
+  origem text not null default 'visitante', -- 'visitante' | 'admin'
+  created_at timestamptz not null default now()
+);
+
+alter table public.sugestoes enable row level security;
+
+-- Visitantes NÃO acessam a tabela diretamente:
+-- a inserção é feita pela Edge Function (service role, ignora RLS).
+-- Somente usuários logados leem/gerenciam as sugestões.
+create policy "sugestoes: select autenticado"
+  on public.sugestoes for select
+  to authenticated
+  using (true);
+
+create policy "sugestoes: insert autenticado"
+  on public.sugestoes for insert
+  to authenticated
+  with check (true);
+
+create policy "sugestoes: update autenticado"
+  on public.sugestoes for update
+  to authenticated
+  using (true);
+
+create policy "sugestoes: delete autenticado"
+  on public.sugestoes for delete
+  to authenticated
+  using (true);
+
+-- ---------- TABELA: eventos (agenda de shows) ----------
+create table if not exists public.eventos (
+  id uuid primary key default gen_random_uuid(),
+  titulo text not null,
+  local text,
+  data date not null,
+  hora time,
+  observacao text,
+  cache text,   -- privado: só a área admin vê
+  duracao text, -- privado: tempo de apresentação combinado
+  created_at timestamptz not null default now()
+);
+
+-- (Se a tabela já existia, adiciona as colunas novas)
+alter table public.eventos add column if not exists cache text;
+alter table public.eventos add column if not exists duracao text;
+
+alter table public.eventos enable row level security;
+
+-- Qualquer visitante pode LER a agenda, mas SEM as colunas privadas
+-- (cache e duracao ficam visíveis apenas para usuários logados)
+create policy "eventos: leitura publica"
+  on public.eventos for select
+  using (true);
+
+revoke select on table public.eventos from anon;
+grant select (id, titulo, local, data, hora, observacao)
+  on table public.eventos to anon;
+
+create policy "eventos: insert autenticado"
+  on public.eventos for insert
+  to authenticated
+  with check (true);
+
+create policy "eventos: update autenticado"
+  on public.eventos for update
+  to authenticated
+  using (true);
+
+create policy "eventos: delete autenticado"
+  on public.eventos for delete
+  to authenticated
+  using (true);
+
+-- ---------- TABELA: videos ----------
+create table if not exists public.videos (
+  id uuid primary key default gen_random_uuid(),
+  titulo text not null,
+  youtube_id text not null,
+  created_at timestamptz not null default now()
+);
+
+alter table public.videos enable row level security;
+
+-- Qualquer visitante pode LER os vídeos
+create policy "videos: leitura publica"
+  on public.videos for select
+  using (true);
+
+create policy "videos: insert autenticado"
+  on public.videos for insert
+  to authenticated
+  with check (true);
+
+create policy "videos: update autenticado"
+  on public.videos for update
+  to authenticated
+  using (true);
+
+create policy "videos: delete autenticado"
+  on public.videos for delete
+  to authenticated
+  using (true);
+
+-- ---------- CIFRAS (PDFs no Storage) ----------
+-- Coluna que liga a música ao arquivo de cifra no bucket
+alter table public.musicas add column if not exists cifra_path text;
+
+-- Bucket público para leitura (URLs estáveis = funciona offline no PWA);
+-- escrita somente autenticada.
+insert into storage.buckets (id, name, public)
+values ('cifras', 'cifras', true)
+on conflict (id) do nothing;
+
+create policy "cifras: upload autenticado"
+  on storage.objects for insert
+  to authenticated
+  with check (bucket_id = 'cifras');
+
+create policy "cifras: update autenticado"
+  on storage.objects for update
+  to authenticated
+  using (bucket_id = 'cifras');
+
+create policy "cifras: delete autenticado"
+  on storage.objects for delete
+  to authenticated
+  using (bucket_id = 'cifras');
+
 -- ---------- (Opcional) Repertório inicial ----------
 -- insert into public.musicas (nome, artista, estilo) values
 --   ('Trevo (Tu)', 'Anavitória', 'MPB'),
