@@ -15,7 +15,6 @@ export default function Home() {
   const { musicas, carregando } = useMusicas();
   const { videos } = useVideos();
 
-  const [pedidoLivre, setPedidoLivre] = useState("");
   const [busca, setBusca] = useState("");
   const [filtroArtista, setFiltroArtista] = useState("Todos");
   const [filtroEstilo, setFiltroEstilo] = useState("Todos");
@@ -80,12 +79,6 @@ export default function Home() {
     });
   }, [musicas, busca, filtroArtista, filtroEstilo]);
 
-  const pedirLivre = () => {
-    const texto = pedidoLivre.trim();
-    if (!texto) return;
-    setPedidoAtual({ musicaFinal: texto, detalhe: "Pedido digitado" });
-  };
-
   const pedirDaLista = (m) => {
     setPedidoAtual({
       musicaFinal: `${m.nome} — ${m.artista}`,
@@ -113,36 +106,9 @@ export default function Home() {
           <div className="gold-rule mt-10" />
         </header>
 
-        {/* PEDIDO LIVRE */}
-        <section className="border border-noir-700 rounded-2xl p-6 mt-8 bg-noir-900/50">
-          <h2 className="section-title text-lg mb-2">Peça sua música</h2>
-          <p className="text-sm text-cream-muted mb-4">
-            Digite a música que você quer ouvir e clique em Pedir. Se quiser,
-            adicione uma mensagem em seguida.
-          </p>
-
-          <div className="flex flex-col sm:flex-row gap-3">
-            <input
-              className="input-noir"
-              placeholder="Qual música você quer?"
-              value={pedidoLivre}
-              onChange={(e) => setPedidoLivre(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && pedirLivre()}
-              maxLength={200}
-            />
-            <button
-              onClick={pedirLivre}
-              className="btn-gold shrink-0 px-6 py-3 rounded-xl"
-              disabled={!pedidoLivre.trim()}
-            >
-              Pedir
-            </button>
-          </div>
-        </section>
-
         {/* REPERTÓRIO */}
-        <section className="border border-noir-700 rounded-2xl p-6 mt-6 bg-noir-900/50">
-          <h2 className="section-title text-lg mb-1">Pedir música</h2>
+        <section className="border border-noir-700 rounded-2xl p-6 mt-8 bg-noir-900/50">
+          <h2 className="section-title text-lg mb-1">Peça sua música</h2>
           <p className="text-sm text-cream-muted mb-4">
             A lista abaixo é o nosso repertório — busque e toque em Pedir.
           </p>
