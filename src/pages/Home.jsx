@@ -29,7 +29,6 @@ export default function Home() {
 
   const pararPreview = () => {
     audioRef.current?.pause();
-    audioRef.current = null;
     setPreviewId(null);
   };
 
@@ -40,20 +39,31 @@ export default function Home() {
       pararPreview();
       return;
     }
-    pararPreview();
+
+    // iOS: o elemento de áudio precisa ser criado e "desbloqueado" com um
+    // play() síncrono DENTRO do toque — depois do await o gesto não vale mais
+    let audio = audioRef.current;
+    if (!audio) {
+      audio = new Audio();
+      audio.addEventListener("ended", () => setPreviewId(null));
+      audioRef.current = audio;
+    }
+    audio.pause();
+    audio.play().catch(() => {});
+
+    setPreviewId(null);
     setPreviewBuscandoId(m.id);
 
     const url = await buscarPreview(m.nome, m.artista);
     setPreviewBuscandoId(null);
 
     if (!url) {
+      audio.pause();
       setSemPreview((s) => new Set(s).add(m.id));
       return;
     }
 
-    const audio = new Audio(url);
-    audio.addEventListener("ended", () => setPreviewId(null));
-    audioRef.current = audio;
+    audio.src = url;
     setPreviewId(m.id);
     audio.play().catch(() => setPreviewId(null));
   };
@@ -162,17 +172,15 @@ export default function Home() {
                     onClick={() => alternarPreview(m)}
                     aria-label={previewId === m.id ? "Parar trecho" : "Ouvir trecho"}
                     title="Ouvir um trecho de 30s"
-                    className={`shrink-0 w-9 h-9 rounded-full border text-sm transition ${
-                      previewId === m.id
-                        ? "btn-gold border-transparent"
-                        : "border-noir-700 text-gold-300 hover:border-gold-500"
-                    }`}
+                    className="btn-gold shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-medium"
                   >
-                    {previewBuscandoId === m.id
-                      ? "⏳"
-                      : previewId === m.id
-                        ? "❚❚"
-                        : "▶"}
+                    {previewBuscandoId === m.id ? (
+                      "⏳"
+                    ) : previewId === m.id ? (
+                      <>❚❚ Parar</>
+                    ) : (
+                      <>▶ Ouvir</>
+                    )}
                   </button>
                 )}
                 <div className="min-w-0 flex-1">
@@ -222,13 +230,23 @@ export default function Home() {
                   key={v.id}
                   className="rounded-2xl overflow-hidden border border-noir-700 bg-noir-900/40"
                 >
-                  <iframe
-                    loading="lazy"
-                    className="w-full aspect-video"
-                    src={`https://www.youtube.com/embed/${v.youtube_id}`}
-                    title={v.titulo}
-                    allowFullScreen
-                  />
+                  {v.youtube_id ? (
+                    <iframe
+                      loading="lazy"
+                      className="w-full aspect-video"
+                      src={`https://www.youtube.com/embed/${v.youtube_id}`}
+                      title={v.titulo}
+                      allowFullScreen
+                    />
+                  ) : (
+                    <iframe
+                      loading="lazy"
+                      className="w-full aspect-[9/16] max-h-[540px]"
+                      src={`https://www.instagram.com/reel/${v.instagram_id}/embed`}
+                      title={v.titulo}
+                      allowFullScreen
+                    />
+                  )}
                   <p className="p-3 text-center text-sm text-cream-muted">{v.titulo}</p>
                 </div>
               ))}

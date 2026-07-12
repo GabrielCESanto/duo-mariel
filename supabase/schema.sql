@@ -71,8 +71,12 @@ create table if not exists public.sugestoes (
   artista text,
   mensagem text,
   origem text not null default 'visitante', -- 'visitante' | 'admin'
+  para text not null default 'Ambos',       -- 'Ambos' | 'Gabriel' | 'Mariana'
   created_at timestamptz not null default now()
 );
+
+-- (Se a tabela já existia, adiciona a coluna nova)
+alter table public.sugestoes add column if not exists para text not null default 'Ambos';
 
 alter table public.sugestoes enable row level security;
 
@@ -147,9 +151,14 @@ create policy "eventos: delete autenticado"
 create table if not exists public.videos (
   id uuid primary key default gen_random_uuid(),
   titulo text not null,
-  youtube_id text not null,
+  youtube_id text,      -- vídeo do YouTube OU...
+  instagram_id text,    -- ...reel do Instagram
   created_at timestamptz not null default now()
 );
+
+-- (Se a tabela já existia, ajusta para aceitar reels)
+alter table public.videos alter column youtube_id drop not null;
+alter table public.videos add column if not exists instagram_id text;
 
 alter table public.videos enable row level security;
 

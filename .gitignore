@@ -8,3 +8,6 @@ supabase/.temp
 
 # arquivos de trabalho na raiz (as logos do site ficam em public/img)
 /Logo*
+
+# Planilhas locais do repertorio
+Repert*rio/

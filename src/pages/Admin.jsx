@@ -230,6 +230,7 @@ function GerenciarMusicas() {
   const [editandoId, setEditandoId] = useState(null);
   const [status, setStatus] = useState("");
   const [enviandoCifraId, setEnviandoCifraId] = useState(null);
+  const [filtroCifra, setFiltroCifra] = useState("todas"); // todas | com | sem
   const navigate = useNavigate();
 
   // --- Autocomplete via iTunes (opcional; digitar manualmente sempre funciona) ---
@@ -265,8 +266,8 @@ function GerenciarMusicas() {
     const { data, error } = await supabase
       .from("musicas")
       .select("*")
-      .order("artista")
-      .order("nome");
+      .order("nome")
+      .order("artista");
     if (!error) setMusicas(data ?? []);
     setCarregando(false);
   };
@@ -372,6 +373,8 @@ function GerenciarMusicas() {
   };
 
   const visiveis = musicas.filter((m) => {
+    if (filtroCifra === "com" && !m.cifra_path) return false;
+    if (filtroCifra === "sem" && m.cifra_path) return false;
     const q = filtro.trim().toLowerCase();
     if (!q) return true;
     return `${m.nome} ${m.artista} ${m.estilo ?? ""}`.toLowerCase().includes(q);
@@ -449,11 +452,11 @@ function GerenciarMusicas() {
                 </div>
                 <ul className="divide-y divide-noir-800">
                   {sugestoesApi.map((s, i) => (
-                    <li key={i}>
+                    <li key={i} className="flex items-center pr-3">
                       <button
                         type="button"
                         onClick={() => usarSugestao(s)}
-                        className="w-full px-4 py-2.5 flex items-center gap-3 text-left hover:bg-noir-800 transition"
+                        className="flex-1 min-w-0 px-4 py-2.5 flex items-center gap-3 text-left hover:bg-noir-800 transition"
                       >
                         {s.capa ? (
                           <img
@@ -474,6 +477,7 @@ function GerenciarMusicas() {
                           </span>
                         </span>
                       </button>
+                      <BotaoOuvir url={s.previewUrl} />
                     </li>
                   ))}
                 </ul>
@@ -523,6 +527,27 @@ function GerenciarMusicas() {
           value={filtro}
           onChange={(e) => setFiltro(e.target.value)}
         />
+
+        {/* Filtro por cifra */}
+        <div className="flex gap-2 mb-2">
+          {[
+            ["todas", `Todas (${musicas.length})`],
+            ["com", `Com cifra (${musicas.filter((m) => m.cifra_path).length})`],
+            ["sem", `Sem cifra (${musicas.filter((m) => !m.cifra_path).length})`],
+          ].map(([valor, rotulo]) => (
+            <button
+              key={valor}
+              onClick={() => setFiltroCifra(valor)}
+              className={`px-3 py-1.5 rounded-full text-xs tracking-wide transition border ${
+                filtroCifra === valor
+                  ? "btn-gold border-transparent"
+                  : "border-noir-700 text-cream-muted hover:text-cream"
+              }`}
+            >
+              {rotulo}
+            </button>
+          ))}
+        </div>
 
         {carregando ? (
           <p className="text-cream-muted text-sm py-4">Carregando...</p>
@@ -583,6 +608,53 @@ function GerenciarMusicas() {
         )}
       </div>
     </div>
+  );
+}
+
+/* ---------------- BOTÃO DE PREVIEW (admin) ---------------- */
+
+// Um único áudio para o admin inteiro; ao tocar outro, o anterior para
+let audioAdmin = null;
+let pararBotaoAnterior = null;
+
+function BotaoOuvir({ url }) {
+  const [tocando, setTocando] = useState(false);
+
+  useEffect(
+    () => () => {
+      if (pararBotaoAnterior) audioAdmin?.pause();
+    },
+    []
+  );
+
+  if (!url) return null;
+
+  const alternar = (e) => {
+    e.stopPropagation();
+    if (tocando) {
+      audioAdmin?.pause();
+      setTocando(false);
+      pararBotaoAnterior = null;
+      return;
+    }
+    audioAdmin?.pause();
+    pararBotaoAnterior?.();
+    audioAdmin = new Audio(url);
+    audioAdmin.addEventListener("ended", () => setTocando(false));
+    audioAdmin.play().catch(() => setTocando(false));
+    setTocando(true);
+    pararBotaoAnterior = () => setTocando(false);
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={alternar}
+      aria-label={tocando ? "Parar trecho" : "Ouvir trecho"}
+      className="shrink-0 w-8 h-8 rounded-full border border-gold-600 text-gold-300 text-xs hover:bg-noir-800 transition"
+    >
+      {tocando ? "❚❚" : "▶"}
+    </button>
   );
 }
 
@@ -665,11 +737,53 @@ function AbaCifras() {
 
 /* ---------------- MÚSICAS PARA APRENDER ---------------- */
 
+const OPCOES_PARA = ["Ambos", "Gabriel", "Mariana"];
+
 function GerenciarSugestoes() {
   const [sugestoes, setSugestoes] = useState([]);
   const [carregando, setCarregando] = useState(true);
-  const [form, setForm] = useState({ musica: "", artista: "" });
+  const [form, setForm] = useState({ musica: "", artista: "", para: "Ambos" });
   const [status, setStatus] = useState("");
+  const [filtroPara, setFiltroPara] = useState(() => new Set(OPCOES_PARA));
+
+  // Autocomplete via iTunes (digitar manualmente sempre funciona)
+  const [sugestoesApi, setSugestoesApi] = useState([]);
+  const [buscandoApi, setBuscandoApi] = useState(false);
+  const escolhaRef = useState({ atual: "" })[0];
+
+  useEffect(() => {
+    const q = form.musica.trim();
+    if (q.length < 3 || q === escolhaRef.atual) {
+      setSugestoesApi([]);
+      setBuscandoApi(false);
+      return;
+    }
+    setBuscandoApi(true);
+    const timer = setTimeout(async () => {
+      const resultados = await buscarMusicasApi(q);
+      setSugestoesApi(resultados);
+      setBuscandoApi(false);
+    }, 450);
+    return () => clearTimeout(timer);
+  }, [form.musica, escolhaRef]);
+
+  const usarSugestaoApi = (s) => {
+    escolhaRef.atual = s.nome;
+    setForm((f) => ({ ...f, musica: s.nome, artista: s.artista }));
+    setSugestoesApi([]);
+  };
+
+  const alternarFiltro = (opcao) => {
+    setFiltroPara((atual) => {
+      const novo = new Set(atual);
+      if (novo.has(opcao)) {
+        if (novo.size > 1) novo.delete(opcao); // pelo menos um selecionado
+      } else {
+        novo.add(opcao);
+      }
+      return novo;
+    });
+  };
 
   const carregar = async () => {
     setCarregando(true);
@@ -693,6 +807,7 @@ function GerenciarSugestoes() {
     const { error } = await supabase.from("sugestoes").insert({
       musica,
       artista: form.artista.trim() || null,
+      para: form.para,
       origem: "admin",
     });
 
@@ -701,7 +816,8 @@ function GerenciarSugestoes() {
       setStatus("❌ Erro ao adicionar.");
       return;
     }
-    setForm({ musica: "", artista: "" });
+    setForm({ musica: "", artista: "", para: form.para });
+    escolhaRef.atual = "";
     setStatus("✅ Adicionada à lista!");
     setTimeout(() => setStatus(""), 2500);
     carregar();
@@ -751,7 +867,7 @@ function GerenciarSugestoes() {
       >
         <h2 className="section-title text-sm mb-4">Adicionar música para aprender</h2>
 
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-3">
           <input
             className="input-noir"
             placeholder="Nome da música *"
@@ -765,7 +881,62 @@ function GerenciarSugestoes() {
             value={form.artista}
             onChange={(e) => setForm({ ...form, artista: e.target.value })}
           />
+          <div className="flex items-center gap-2">
+            <label className="text-sm text-cream-muted shrink-0">Para:</label>
+            <select
+              className="input-noir"
+              value={form.para}
+              onChange={(e) => setForm({ ...form, para: e.target.value })}
+            >
+              {OPCOES_PARA.map((o) => (
+                <option key={o} value={o}>
+                  {o}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
+
+        {/* Sugestões da busca (opcional — dá para ignorar e digitar tudo) */}
+        {(buscandoApi || sugestoesApi.length > 0) && (
+          <div className="mt-3 border border-noir-700 rounded-xl bg-noir-900 overflow-hidden">
+            {buscandoApi ? (
+              <p className="px-4 py-3 text-xs text-cream-muted">Buscando sugestões...</p>
+            ) : (
+              <ul className="divide-y divide-noir-800">
+                {sugestoesApi.map((s, i) => (
+                  <li key={i} className="flex items-center pr-3">
+                    <button
+                      type="button"
+                      onClick={() => usarSugestaoApi(s)}
+                      className="flex-1 min-w-0 px-4 py-2.5 flex items-center gap-3 text-left hover:bg-noir-800 transition"
+                    >
+                      {s.capa ? (
+                        <img
+                          src={s.capa}
+                          alt=""
+                          className="w-9 h-9 rounded-lg border border-noir-700 shrink-0"
+                        />
+                      ) : (
+                        <span className="w-9 h-9 rounded-lg border border-noir-700 shrink-0 flex items-center justify-center text-cream-muted">
+                          ♪
+                        </span>
+                      )}
+                      <span className="min-w-0">
+                        <span className="block text-sm text-cream truncate">{s.nome}</span>
+                        <span className="block text-xs text-cream-muted truncate">
+                          {s.artista}
+                          {s.estilo ? ` • ${s.estilo}` : ""}
+                        </span>
+                      </span>
+                    </button>
+                    <BotaoOuvir url={s.previewUrl} />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
 
         <div className="mt-4 flex items-center gap-3">
           <button type="submit" className="btn-gold px-6 py-2.5 rounded-xl text-sm">
@@ -781,11 +952,30 @@ function GerenciarSugestoes() {
           Para aprender ({sugestoes.length})
         </h2>
 
+        {/* Filtro por pessoa (multiseleção) */}
+        <div className="flex gap-2 mb-3">
+          {OPCOES_PARA.map((o) => (
+            <button
+              key={o}
+              onClick={() => alternarFiltro(o)}
+              className={`px-3 py-1.5 rounded-full text-xs tracking-wide transition border ${
+                filtroPara.has(o)
+                  ? "btn-gold border-transparent"
+                  : "border-noir-700 text-cream-muted hover:text-cream"
+              }`}
+            >
+              {o} ({sugestoes.filter((s) => (s.para ?? "Ambos") === o).length})
+            </button>
+          ))}
+        </div>
+
         {carregando ? (
           <p className="text-cream-muted text-sm py-4">Carregando...</p>
         ) : (
           <ul className="divide-y divide-noir-800 max-h-[480px] overflow-y-auto pr-2">
-            {sugestoes.map((s) => (
+            {sugestoes
+              .filter((s) => filtroPara.has(s.para ?? "Ambos"))
+              .map((s) => (
               <li key={s.id} className="py-3 flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <p className="text-cream truncate">
@@ -793,6 +983,11 @@ function GerenciarSugestoes() {
                     {s.origem === "visitante" && (
                       <span className="ml-2 text-[10px] uppercase tracking-wider text-gold-300 border border-gold-600 rounded-full px-2 py-0.5">
                         público
+                      </span>
+                    )}
+                    {(s.para ?? "Ambos") !== "Ambos" && (
+                      <span className="ml-2 text-[10px] uppercase tracking-wider text-cream-muted border border-noir-600 rounded-full px-2 py-0.5">
+                        {s.para}
                       </span>
                     )}
                   </p>
@@ -1086,6 +1281,12 @@ function extrairYoutubeId(texto) {
   return null;
 }
 
+// Aceita link de reel/post do Instagram
+function extrairInstagramId(texto) {
+  const m = texto.trim().match(/instagram\.com\/(?:reel|reels|p)\/([A-Za-z0-9_-]+)/);
+  return m ? m[1] : null;
+}
+
 function GerenciarVideos() {
   const [videos, setVideos] = useState([]);
   const [carregando, setCarregando] = useState(true);
@@ -1110,17 +1311,18 @@ function GerenciarVideos() {
     e.preventDefault();
     const titulo = form.titulo.trim();
     const youtubeId = extrairYoutubeId(form.link);
+    const instagramId = youtubeId ? null : extrairInstagramId(form.link);
 
     if (!titulo) return;
-    if (!youtubeId) {
-      setStatus("❌ Link do YouTube inválido. Cole o link do vídeo.");
+    if (!youtubeId && !instagramId) {
+      setStatus("❌ Link inválido. Cole um link do YouTube ou de um Reel do Instagram.");
       return;
     }
 
     setStatus("⏳ Salvando...");
     const { error } = await supabase
       .from("videos")
-      .insert({ titulo, youtube_id: youtubeId });
+      .insert({ titulo, youtube_id: youtubeId, instagram_id: instagramId });
 
     if (error) {
       console.error(error);
@@ -1164,7 +1366,7 @@ function GerenciarVideos() {
           />
           <input
             className="input-noir"
-            placeholder="Link do YouTube *"
+            placeholder="Link do YouTube ou Reel do Instagram *"
             value={form.link}
             onChange={(e) => setForm({ ...form, link: e.target.value })}
             required
@@ -1190,20 +1392,32 @@ function GerenciarVideos() {
             {videos.map((v) => (
               <li key={v.id} className="py-3 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3 min-w-0">
-                  <img
-                    src={`https://img.youtube.com/vi/${v.youtube_id}/default.jpg`}
-                    alt=""
-                    className="w-20 h-12 object-cover rounded-lg border border-noir-700 shrink-0"
-                  />
+                  {v.youtube_id ? (
+                    <img
+                      src={`https://img.youtube.com/vi/${v.youtube_id}/default.jpg`}
+                      alt=""
+                      className="w-20 h-12 object-cover rounded-lg border border-noir-700 shrink-0"
+                    />
+                  ) : (
+                    <span className="w-20 h-12 rounded-lg border border-noir-700 shrink-0 flex items-center justify-center text-lg">
+                      📷
+                    </span>
+                  )}
                   <div className="min-w-0">
                     <p className="text-cream truncate">{v.titulo}</p>
                     <a
-                      href={`https://youtu.be/${v.youtube_id}`}
+                      href={
+                        v.youtube_id
+                          ? `https://youtu.be/${v.youtube_id}`
+                          : `https://www.instagram.com/reel/${v.instagram_id}/`
+                      }
                       target="_blank"
                       rel="noreferrer"
                       className="text-cream-muted text-xs hover:text-gold-300 transition"
                     >
-                      youtu.be/{v.youtube_id}
+                      {v.youtube_id
+                        ? `youtu.be/${v.youtube_id}`
+                        : `instagram.com/reel/${v.instagram_id}`}
                     </a>
                   </div>
                 </div>

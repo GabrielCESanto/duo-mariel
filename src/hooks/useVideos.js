@@ -19,7 +19,7 @@ export function useVideos() {
     setCarregando(true);
     const { data, error } = await supabase
       .from("videos")
-      .select("id, titulo, youtube_id")
+      .select("id, titulo, youtube_id, instagram_id")
       .order("created_at", { ascending: false });
 
     if (error) {

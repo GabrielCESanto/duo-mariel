@@ -18,8 +18,8 @@ export function useMusicas() {
     const { data, error } = await supabase
       .from("musicas")
       .select("id, nome, artista, estilo")
-      .order("artista", { ascending: true })
-      .order("nome", { ascending: true });
+      .order("nome", { ascending: true })
+      .order("artista", { ascending: true });
 
     if (error) {
       console.error("Erro ao carregar repertório:", error);

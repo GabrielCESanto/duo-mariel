@@ -20,7 +20,25 @@ Deno.serve(async (req) => {
 
   try {
     const body = await req.json();
-    const tipo = body.tipo === "aprender" ? "aprender" : "pedido";
+    const tipo = ["aprender", "itunes"].includes(body.tipo)
+      ? body.tipo
+      : "pedido";
+
+    // Proxy da iTunes Search API: no iPhone a Apple redireciona a chamada
+    // direta para musics:// e o navegador bloqueia (CORS)
+    if (tipo === "itunes") {
+      const termo = String(body.termo ?? "").slice(0, 200).trim();
+      const limite = Math.min(Math.max(Number(body.limite) || 1, 1), 10);
+      if (!termo) return json({ results: [] });
+
+      const resp = await fetch(
+        `https://itunes.apple.com/search?term=${encodeURIComponent(termo)}` +
+          `&media=music&entity=song&limit=${limite}&country=BR`
+      );
+      if (!resp.ok) return json({ results: [] });
+      const dados = await resp.json();
+      return json({ results: dados.results ?? [] });
+    }
 
     // Cliente com service role — ignora RLS
     const supabase = createClient(
