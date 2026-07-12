@@ -1230,9 +1230,10 @@ const dataIso = (diasAtras = 0) => {
 // Endpoint público de contador do GoatCounter (sem chave/senha)
 async function contarAcessos(caminho, inicio) {
   try {
+    // Obs.: o parâmetro "end" retorna 404 nesse endpoint — usar só "start"
     const url =
       `https://${GOATCOUNTER_CODE}.goatcounter.com/counter/` +
-      `${encodeURIComponent(caminho)}.json?start=${inicio}&end=${dataIso()}`;
+      `${encodeURIComponent(caminho)}.json?start=${inicio}`;
     const resp = await fetch(url);
     if (!resp.ok) return null;
     const json = await resp.json();
