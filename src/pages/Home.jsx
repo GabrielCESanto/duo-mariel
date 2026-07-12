@@ -142,7 +142,10 @@ export default function Home() {
 
         {/* REPERTÓRIO */}
         <section className="border border-noir-700 rounded-2xl p-6 mt-6 bg-noir-900/50">
-          <h2 className="section-title text-lg mb-4">Repertório</h2>
+          <h2 className="section-title text-lg mb-1">Pedir música</h2>
+          <p className="text-sm text-cream-muted mb-4">
+            A lista abaixo é o nosso repertório — busque e toque em Pedir.
+          </p>
 
           <input
             className="input-noir text-lg"
@@ -224,16 +227,23 @@ export default function Home() {
 
             {!carregando && resultados.length === 0 && (
               <li className="py-6 text-cream-muted text-sm">
-                <p>Nada encontrado. Tente outro termo — ou peça na caixa acima! 🙂</p>
-                <button
-                  onClick={() => setSugestaoAberta(true)}
-                  className="mt-3 px-4 py-2 rounded-xl border border-gold-600 text-gold-300 hover:bg-noir-800 transition text-sm"
-                >
-                  🎸 Sugerir essa música para o repertório
-                </button>
+                Nada encontrado. Tente outro termo — ou sugira logo abaixo! 👇
               </li>
             )}
           </ul>
+
+          {/* Sugerir música fora do repertório — sempre visível */}
+          <div className="mt-4 pt-5 border-t border-noir-800 text-center">
+            <p className="text-sm text-cream-muted mb-3">
+              Não encontrou a música que queria?
+            </p>
+            <button
+              onClick={() => setSugestaoAberta(true)}
+              className="btn-gold px-6 py-3 rounded-xl text-sm"
+            >
+              🎸 Pedir para entrar no repertório
+            </button>
+          </div>
         </section>
 
         {/* VÍDEOS */}
