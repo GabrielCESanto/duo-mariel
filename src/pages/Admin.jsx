@@ -157,7 +157,7 @@ function Painel() {
 
   useEffect(() => {
     contarPendentes();
-    const timer = setInterval(contarPendentes, 60_000);
+    const timer = setInterval(contarPendentes, 20_000);
     return () => clearInterval(timer);
   }, []);
 
@@ -1355,8 +1355,8 @@ function GerenciarPedidos({ onMudanca }) {
   const [carregando, setCarregando] = useState(true);
   const [mostrar, setMostrar] = useState("pendentes"); // pendentes | atendidos
 
-  const carregar = async () => {
-    setCarregando(true);
+  const carregar = async (mostrarLoading = true) => {
+    if (mostrarLoading) setCarregando(true);
     const { data, error } = await supabase
       .from("pedidos")
       .select("*")
@@ -1369,6 +1369,10 @@ function GerenciarPedidos({ onMudanca }) {
 
   useEffect(() => {
     carregar();
+    // Atualiza sozinho enquanto a aba está aberta (sem piscar "Carregando")
+    const timer = setInterval(() => carregar(false), 20_000);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const alternarAtendido = async (p) => {
