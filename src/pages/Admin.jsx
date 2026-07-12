@@ -1353,6 +1353,7 @@ function AbaAcessos() {
 function GerenciarPedidos({ onMudanca }) {
   const [pedidos, setPedidos] = useState([]);
   const [carregando, setCarregando] = useState(true);
+  const [mostrar, setMostrar] = useState("pendentes"); // pendentes | atendidos
 
   const carregar = async () => {
     setCarregando(true);
@@ -1384,6 +1385,10 @@ function GerenciarPedidos({ onMudanca }) {
     if (!error) carregar();
   };
 
+  const visiveis = pedidos.filter((p) =>
+    mostrar === "pendentes" ? !p.atendido : p.atendido
+  );
+
   return (
     <div className="border border-noir-700 rounded-2xl p-5 bg-noir-900/50">
       <div className="flex items-center justify-between mb-4">
@@ -1396,11 +1401,35 @@ function GerenciarPedidos({ onMudanca }) {
         </button>
       </div>
 
+      {/* Toggle pendentes / atendidos */}
+      <div className="flex gap-2 mb-3">
+        <button
+          onClick={() => setMostrar("pendentes")}
+          className={`px-4 py-1.5 rounded-full text-xs tracking-wide transition border ${
+            mostrar === "pendentes"
+              ? "btn-gold border-transparent"
+              : "border-noir-700 text-cream-muted hover:text-cream"
+          }`}
+        >
+          Pendentes ({pedidos.filter((p) => !p.atendido).length})
+        </button>
+        <button
+          onClick={() => setMostrar("atendidos")}
+          className={`px-4 py-1.5 rounded-full text-xs tracking-wide transition border ${
+            mostrar === "atendidos"
+              ? "btn-gold border-transparent"
+              : "border-noir-700 text-cream-muted hover:text-cream"
+          }`}
+        >
+          Atendidos ({pedidos.filter((p) => p.atendido).length})
+        </button>
+      </div>
+
       {carregando ? (
         <p className="text-cream-muted text-sm py-4">Carregando...</p>
       ) : (
         <ul className="divide-y divide-noir-800">
-          {pedidos.map((p) => (
+          {visiveis.map((p) => (
             <li key={p.id} className="py-3 flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className={`truncate ${p.atendido ? "line-through text-cream-muted" : "text-cream"}`}>
@@ -1429,8 +1458,12 @@ function GerenciarPedidos({ onMudanca }) {
               </div>
             </li>
           ))}
-          {pedidos.length === 0 && (
-            <li className="py-4 text-cream-muted text-sm">Nenhum pedido ainda.</li>
+          {visiveis.length === 0 && (
+            <li className="py-4 text-cream-muted text-sm">
+              {mostrar === "pendentes"
+                ? "Nenhum pedido pendente. 🎉"
+                : "Nenhum pedido atendido ainda."}
+            </li>
           )}
         </ul>
       )}
