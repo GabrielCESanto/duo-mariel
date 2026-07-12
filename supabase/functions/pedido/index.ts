@@ -28,17 +28,6 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    const TOKEN = Deno.env.get("TELEGRAM_TOKEN");
-    const CHAT_ID = Deno.env.get("TELEGRAM_CHAT_ID");
-    const notificar = async (texto: string) => {
-      if (!TOKEN || !CHAT_ID) return;
-      await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chat_id: CHAT_ID, text: texto }),
-      });
-    };
-
     if (tipo === "aprender") {
       // Sugestão de música para o duo aprender
       const { musica, artista, mensagem } = body;
@@ -65,14 +54,11 @@ Deno.serve(async (req) => {
         .from("sugestoes")
         .insert(registro);
 
-      if (dbError) console.error("Erro ao salvar sugestão:", dbError);
-
-      await notificar(
-        `🎸 SUGESTÃO PARA APRENDER — DUO MARIEL\n\n` +
-          `Música: ${registro.musica}\n` +
-          `Artista: ${registro.artista || "—"}\n\n` +
-          `Mensagem:\n${registro.mensagem || "—"}`
-      );
+      // Sem o Telegram, o banco é o único registro — falha precisa avisar
+      if (dbError) {
+        console.error("Erro ao salvar sugestão:", dbError);
+        return json({ error: "Erro ao salvar" }, 500);
+      }
 
       return json({ ok: true });
     }
@@ -95,13 +81,10 @@ Deno.serve(async (req) => {
       .from("pedidos")
       .insert({ pedido: pedidoLimpo, mensagem: mensagemLimpa });
 
-    if (dbError) console.error("Erro ao salvar pedido:", dbError);
-
-    await notificar(
-      `🎵 NOVO PEDIDO — DUO MARIEL\n\n` +
-        `Pedido: ${pedidoLimpo}\n\n` +
-        `Mensagem:\n${mensagemLimpa || "—"}`
-    );
+    if (dbError) {
+      console.error("Erro ao salvar pedido:", dbError);
+      return json({ error: "Erro ao salvar" }, 500);
+    }
 
     return json({ ok: true });
   } catch (e) {

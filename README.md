@@ -11,10 +11,11 @@ Edge Function) + GitHub Pages (hospedagem gratuita).
 - **Página pública:** hero com a logo, repertório com busca e filtros
   (artista/estilo), pedido de música livre ou da lista, vídeos (gerenciados
   pela aba **Vídeos** da área admin), sobre o duo.
-- **Pedidos:** salvos no banco e notificados em tempo real no **Telegram**.
+- **Pedidos:** salvos no banco; a aba Pedidos do admin mostra um contador de
+  pendentes e um filtro pendentes/atendidos.
 - **Sugestões de músicas ("para aprender"):** quem não encontra a música no
   repertório pode sugerir que o duo aprenda; a sugestão cai na aba **Aprender**
-  da área admin (com notificação no Telegram) e, quando aprendida, vira item
+  da área admin e, quando aprendida, vira item
   do repertório com um clique.
 - **Agenda de shows:** lista de próximos shows na página pública, gerenciada
   pela aba **Agenda** da área admin (com cachê e tempo de apresentação
@@ -57,20 +58,18 @@ npm run dev
 4. Em **Project Settings > API**, copie a `URL` e a `anon key`.
 5. Crie o arquivo `.env` na raiz (copie de `.env.example`) e preencha os valores.
 
-### 2. Notificação no Telegram (pedidos)
+### 2. Edge Function (pedidos e sugestões)
 
-1. Fale com o [@BotFather](https://t.me/BotFather) no Telegram, crie um bot
-   (`/newbot`) e guarde o **token**.
-2. Crie um grupo com você + sua parceira + o bot, e descubra o `chat_id` do
-   grupo (ex.: adicione o bot [@getidsbot](https://t.me/getidsbot) temporariamente).
-3. Instale a CLI do Supabase e faça o deploy da função:
+Instale a CLI do Supabase e faça o deploy da função:
 
-   ```bash
-   npx supabase login
-   npx supabase link --project-ref SEU_PROJECT_REF
-   npx supabase secrets set TELEGRAM_TOKEN=seu-token TELEGRAM_CHAT_ID=seu-chat-id
-   npx supabase functions deploy pedido --no-verify-jwt
-   ```
+```bash
+npx supabase login
+npx supabase link --project-ref SEU_PROJECT_REF
+npx supabase functions deploy pedido --no-verify-jwt
+```
+
+(Ou cole o conteúdo de `supabase/functions/pedido/index.ts` no editor de
+Edge Functions do Dashboard e clique em Deploy.)
 
 ### 3. GitHub Pages
 
