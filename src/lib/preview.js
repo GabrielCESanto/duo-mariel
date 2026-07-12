@@ -6,15 +6,21 @@ import { PEDIDO_FUNCTION_URL, anonKey, supabaseConfigured } from "./supabase";
 
 const cache = new Map();
 
+// Depois que a via direta falha uma vez (iOS), vai sempre pelo proxy
+let usarSomenteProxy = false;
+
 async function buscarNoItunes(termo, limite) {
   const params = `term=${encodeURIComponent(termo)}&media=music&entity=song&limit=${limite}&country=BR`;
 
   // 1) Tentativa direta (funciona em desktop/Android)
-  try {
-    const resp = await fetch(`https://itunes.apple.com/search?${params}`);
-    if (resp.ok) return (await resp.json()).results ?? [];
-  } catch {
-    // segue para o proxy
+  if (!usarSomenteProxy) {
+    try {
+      const resp = await fetch(`https://itunes.apple.com/search?${params}`);
+      if (resp.ok) return (await resp.json()).results ?? [];
+      usarSomenteProxy = true;
+    } catch {
+      usarSomenteProxy = true; // segue para o proxy
+    }
   }
 
   // 2) Proxy via edge function (necessário no iOS)
