@@ -1040,6 +1040,25 @@ const FORM_EVENTO_VAZIO = {
   observacao: "",
 };
 
+// Máscara de moeda: digita só números e formata como R$ 0,00 (centavos primeiro)
+const mascaraMoeda = (texto) => {
+  const digitos = texto.replace(/\D/g, "").slice(0, 12);
+  if (!digitos) return "";
+  return (Number(digitos) / 100).toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  });
+};
+
+// Normaliza valores antigos salvos como texto livre (ex.: "R$ 800" → "R$ 800,00")
+const normalizarMoeda = (texto) => {
+  if (!texto) return "";
+  const limpo = String(texto).replace(/[^\d,.-]/g, "").replace(/\./g, "").replace(",", ".");
+  const numero = parseFloat(limpo);
+  if (isNaN(numero)) return texto;
+  return numero.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+};
+
 const formatarDataCurta = (iso) =>
   new Date(`${iso}T12:00:00`).toLocaleDateString("pt-BR", {
     day: "2-digit",
@@ -1109,7 +1128,7 @@ function GerenciarAgenda() {
       data: ev.data,
       hora: ev.hora ? ev.hora.slice(0, 5) : "",
       duracao: ev.duracao ?? "",
-      cache: ev.cache ?? "",
+      cache: normalizarMoeda(ev.cache),
       observacao: ev.observacao ?? "",
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1179,9 +1198,10 @@ function GerenciarAgenda() {
           />
           <input
             className="input-noir"
-            placeholder="Cachê (ex.: R$ 800) — só vocês veem"
+            inputMode="numeric"
+            placeholder="Cachê (ex.: R$ 800,00) — só vocês veem"
             value={form.cache}
-            onChange={(e) => setForm({ ...form, cache: e.target.value })}
+            onChange={(e) => setForm({ ...form, cache: mascaraMoeda(e.target.value) })}
           />
         </div>
 
@@ -1232,7 +1252,7 @@ function GerenciarAgenda() {
                       {ev.local ? ` • ${ev.local}` : ""}
                     </p>
                     {ev.cache && (
-                      <p className="text-gold-300/90 text-xs truncate">💰 {ev.cache}</p>
+                      <p className="text-gold-300/90 text-xs truncate">💰 {normalizarMoeda(ev.cache)}</p>
                     )}
                     {ev.observacao && (
                       <p className="text-cream-muted/70 text-xs truncate">{ev.observacao}</p>

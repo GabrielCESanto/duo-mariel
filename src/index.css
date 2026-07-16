@@ -99,6 +99,22 @@ body {
   outline: none;
   transition: border-color 0.2s ease;
   color: var(--color-cream);
+  color-scheme: dark;
+}
+input[type="date"].input-noir,
+input[type="time"].input-noir {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+}
+input[type="date"].input-noir::-webkit-calendar-picker-indicator,
+input[type="time"].input-noir::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity 0.2s ease;
+}
+input[type="date"].input-noir:hover::-webkit-calendar-picker-indicator,
+input[type="time"].input-noir:hover::-webkit-calendar-picker-indicator {
+  opacity: 1;
 }
 .input-noir::placeholder {
   color: var(--color-cream-muted);
