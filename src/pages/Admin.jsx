@@ -1072,6 +1072,16 @@ const mascaraHora = (texto) => {
   return `${digitos.slice(0, 2)}:${digitos.slice(2)}`;
 };
 
+// Exibição amigável da duração: "03:00" → "3h", "02:30" → "2h30min"
+const formatarDuracao = (texto) => {
+  const m = String(texto ?? "").match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return texto;
+  const horas = Number(m[1]);
+  const minutos = Number(m[2]);
+  if (!horas) return `${minutos}min`;
+  return minutos ? `${horas}h${String(minutos).padStart(2, "0")}min` : `${horas}h`;
+};
+
 const formatarDataCurta = (iso) =>
   new Date(`${iso}T12:00:00`).toLocaleDateString("pt-BR", {
     day: "2-digit",
@@ -1265,7 +1275,7 @@ function GerenciarAgenda() {
                     <p className="text-cream-muted text-sm truncate">
                       {formatarDataCurta(ev.data)}
                       {ev.hora ? ` • ${ev.hora.slice(0, 5)}` : ""}
-                      {ev.duracao ? ` • ${ev.duracao}` : ""}
+                      {ev.duracao ? ` • ${formatarDuracao(ev.duracao)}` : ""}
                       {ev.local ? ` • ${ev.local}` : ""}
                     </p>
                     {ev.cache && (
