@@ -1207,9 +1207,11 @@ function GerenciarAgenda() {
           />
           <input
             className="input-noir"
-            placeholder="Tempo de apresentação (ex.: 2h)"
+            inputMode="numeric"
+            maxLength={5}
+            placeholder="Tempo de apresentação (ex.: 02:00)"
             value={form.duracao}
-            onChange={(e) => setForm({ ...form, duracao: e.target.value })}
+            onChange={(e) => setForm({ ...form, duracao: mascaraHora(e.target.value) })}
           />
           <input
             className="input-noir"
