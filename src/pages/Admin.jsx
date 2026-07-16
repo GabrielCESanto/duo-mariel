@@ -1059,6 +1059,19 @@ const normalizarMoeda = (texto) => {
   return numero.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 };
 
+// Máscara de hora: digita só números e formata como hh:mm (limita 23:59)
+const mascaraHora = (texto) => {
+  let digitos = texto.replace(/\D/g, "").slice(0, 4);
+  if (digitos.length >= 2 && Number(digitos.slice(0, 2)) > 23) {
+    digitos = `23${digitos.slice(2)}`;
+  }
+  if (digitos.length === 4 && Number(digitos.slice(2)) > 59) {
+    digitos = `${digitos.slice(0, 2)}59`;
+  }
+  if (digitos.length <= 2) return digitos;
+  return `${digitos.slice(0, 2)}:${digitos.slice(2)}`;
+};
+
 const formatarDataCurta = (iso) =>
   new Date(`${iso}T12:00:00`).toLocaleDateString("pt-BR", {
     day: "2-digit",
@@ -1094,7 +1107,7 @@ function GerenciarAgenda() {
       titulo: form.titulo.trim(),
       local: form.local.trim() || null,
       data: form.data,
-      hora: form.hora || null,
+      hora: /^\d{2}:\d{2}$/.test(form.hora) ? form.hora : null,
       duracao: form.duracao.trim() || null,
       cache: form.cache.trim() || null,
       observacao: form.observacao.trim() || null,
@@ -1185,10 +1198,12 @@ function GerenciarAgenda() {
             required
           />
           <input
-            type="time"
             className="input-noir"
+            inputMode="numeric"
+            maxLength={5}
+            placeholder="Hora (ex.: 20:30)"
             value={form.hora}
-            onChange={(e) => setForm({ ...form, hora: e.target.value })}
+            onChange={(e) => setForm({ ...form, hora: mascaraHora(e.target.value) })}
           />
           <input
             className="input-noir"
