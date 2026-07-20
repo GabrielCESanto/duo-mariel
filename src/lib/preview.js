@@ -54,6 +54,43 @@ export async function buscarPreview(nome, artista) {
   return url;
 }
 
+// Verifica se a música existe no iTunes (checagem em lote da área admin).
+// Retorna true/false, ou null quando a checagem falhou (rede, limite da API) —
+// nesse caso não dá para afirmar que a música não existe.
+export async function existeNoItunes(nome, artista) {
+  const params =
+    `term=${encodeURIComponent(`${nome} ${artista ?? ""}`.trim())}` +
+    `&media=music&entity=song&limit=1&country=BR`;
+
+  try {
+    const resp = await fetch(`https://itunes.apple.com/search?${params}`);
+    if (resp.ok) return ((await resp.json()).results ?? []).length > 0;
+  } catch {
+    // segue para o proxy
+  }
+
+  if (!supabaseConfigured) return null;
+  try {
+    const resp = await fetch(PEDIDO_FUNCTION_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: anonKey,
+        Authorization: `Bearer ${anonKey}`,
+      },
+      body: JSON.stringify({
+        tipo: "itunes",
+        termo: `${nome} ${artista ?? ""}`.trim(),
+        limite: 1,
+      }),
+    });
+    if (!resp.ok) return null;
+    return ((await resp.json()).results ?? []).length > 0;
+  } catch {
+    return null;
+  }
+}
+
 // Busca músicas para autocompletar o cadastro (nome, artista, estilo, capa).
 // Se a API falhar ou não achar, retorna [] — o cadastro manual segue normal.
 export async function buscarMusicasApi(termo) {

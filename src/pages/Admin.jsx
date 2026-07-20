@@ -2,9 +2,18 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { supabase, supabaseConfigured } from "../lib/supabase";
 import { GOATCOUNTER_CODE } from "../config";
-import { buscarMusicasApi } from "../lib/preview";
+import { buscarMusicasApi, existeNoItunes } from "../lib/preview";
 
 const BASE = import.meta.env.BASE_URL;
+
+// Compara nomes de músicas ignorando acentos, caixa e pontuação
+const normalizarNome = (s) =>
+  String(s ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
 
 export default function Admin() {
   const [sessao, setSessao] = useState(null);
@@ -233,6 +242,44 @@ function GerenciarMusicas() {
   const [filtroCifra, setFiltroCifra] = useState("todas"); // todas | com | sem
   const navigate = useNavigate();
 
+  // --- Checagem no iTunes (resultado fica salvo no navegador) ---
+  const [filtroItunes, setFiltroItunes] = useState(false);
+  const [verificandoItunes, setVerificandoItunes] = useState(null); // "x/y" durante a checagem
+  const [itunesMap, setItunesMap] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem("itunes-check-v1")) ?? {};
+    } catch {
+      return {};
+    }
+  });
+
+  const chaveItunes = (m) => `${m.nome}|${m.artista}`.toLowerCase();
+
+  const verificarItunes = async () => {
+    // Só consulta o que ainda não foi checado; para rechecar tudo, limpar o cache
+    const pendentes = musicas.filter((m) => itunesMap[chaveItunes(m)] === undefined);
+    if (pendentes.length === 0 && musicas.length > 0) {
+      if (window.confirm("Todas já foram checadas. Rechecar do zero?")) {
+        localStorage.removeItem("itunes-check-v1");
+        setItunesMap({});
+      }
+      return;
+    }
+    const mapa = { ...itunesMap };
+    for (const [i, m] of pendentes.entries()) {
+      setVerificandoItunes(`${i + 1}/${pendentes.length}`);
+      const achou = await existeNoItunes(m.nome, m.artista);
+      if (achou !== null) {
+        mapa[chaveItunes(m)] = achou;
+        setItunesMap({ ...mapa });
+        localStorage.setItem("itunes-check-v1", JSON.stringify(mapa));
+      }
+      // Pausa entre chamadas para não estourar o limite da API
+      await new Promise((r) => setTimeout(r, 350));
+    }
+    setVerificandoItunes(null);
+  };
+
   // --- Autocomplete via iTunes (opcional; digitar manualmente sempre funciona) ---
   const [sugestoesApi, setSugestoesApi] = useState([]);
   const [buscandoApi, setBuscandoApi] = useState(false);
@@ -375,6 +422,7 @@ function GerenciarMusicas() {
   const visiveis = musicas.filter((m) => {
     if (filtroCifra === "com" && !m.cifra_path) return false;
     if (filtroCifra === "sem" && m.cifra_path) return false;
+    if (filtroItunes && itunesMap[chaveItunes(m)] !== false) return false;
     const q = filtro.trim().toLowerCase();
     if (!q) return true;
     return `${m.nome} ${m.artista} ${m.estilo ?? ""}`.toLowerCase().includes(q);
@@ -547,6 +595,25 @@ function GerenciarMusicas() {
               {rotulo}
             </button>
           ))}
+          <button
+            onClick={() => setFiltroItunes((v) => !v)}
+            title="Mostrar só as músicas que não foram encontradas na busca do iTunes"
+            className={`px-3 py-1.5 rounded-full text-xs tracking-wide transition border ${
+              filtroItunes
+                ? "btn-gold border-transparent"
+                : "border-noir-700 text-cream-muted hover:text-cream"
+            }`}
+          >
+            Sem iTunes ({musicas.filter((m) => itunesMap[chaveItunes(m)] === false).length})
+          </button>
+          <button
+            onClick={verificarItunes}
+            disabled={!!verificandoItunes || carregando}
+            title="Consulta cada música na busca do iTunes (roda uma vez e fica salvo)"
+            className="px-3 py-1.5 rounded-full text-xs tracking-wide transition border border-noir-700 text-cream-muted hover:text-gold-300 hover:border-gold-600 disabled:opacity-50"
+          >
+            {verificandoItunes ? `⏳ ${verificandoItunes}` : "🔎 Verificar iTunes"}
+          </button>
         </div>
 
         {carregando ? (
@@ -556,7 +623,17 @@ function GerenciarMusicas() {
             {visiveis.map((m) => (
               <li key={m.id} className="py-3 flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="text-cream truncate">{m.nome}</p>
+                  <p className="text-cream truncate">
+                    {m.nome}
+                    {itunesMap[chaveItunes(m)] === false && (
+                      <span
+                        title="Não encontrada na busca do iTunes — confira a grafia de nome/artista"
+                        className="ml-2 text-[10px] uppercase tracking-wider text-amber-300 border border-amber-700 rounded-full px-2 py-0.5"
+                      >
+                        ⚠ sem iTunes
+                      </span>
+                    )}
+                  </p>
                   <p className="text-cream-muted text-sm truncate">
                     {m.artista}
                     {m.estilo ? ` • ${m.estilo}` : ""}
@@ -745,6 +822,7 @@ function GerenciarSugestoes() {
   const [form, setForm] = useState({ musica: "", artista: "", para: "Ambos" });
   const [status, setStatus] = useState("");
   const [filtroPara, setFiltroPara] = useState(() => new Set(OPCOES_PARA));
+  const [repertorio, setRepertorio] = useState(() => new Set());
 
   // Autocomplete via iTunes (digitar manualmente sempre funciona)
   const [sugestoesApi, setSugestoesApi] = useState([]);
@@ -787,11 +865,12 @@ function GerenciarSugestoes() {
 
   const carregar = async () => {
     setCarregando(true);
-    const { data, error } = await supabase
-      .from("sugestoes")
-      .select("*")
-      .order("created_at", { ascending: false });
+    const [{ data, error }, { data: reps }] = await Promise.all([
+      supabase.from("sugestoes").select("*").order("created_at", { ascending: false }),
+      supabase.from("musicas").select("nome"),
+    ]);
     if (!error) setSugestoes(data ?? []);
+    setRepertorio(new Set((reps ?? []).map((r) => normalizarNome(r.nome))));
     setCarregando(false);
   };
 
@@ -844,6 +923,27 @@ function GerenciarSugestoes() {
     await supabase.from("sugestoes").delete().eq("id", s.id);
     setStatus(`✅ "${s.musica}" agora está no repertório!`);
     setTimeout(() => setStatus(""), 3000);
+    carregar();
+  };
+
+  // Confirmação dupla: quando é para Ambos, a música só vai ao repertório
+  // depois que Gabs E Mari confirmarem
+  const confirmar = async (s, campo) => {
+    const novoValor = !s[campo];
+    const { error } = await supabase
+      .from("sugestoes")
+      .update({ [campo]: novoValor })
+      .eq("id", s.id);
+    if (error) {
+      console.error(error);
+      setStatus("❌ Erro ao confirmar. As colunas ok_gabs/ok_mari existem no banco?");
+      return;
+    }
+    const outro = campo === "ok_gabs" ? "ok_mari" : "ok_gabs";
+    if (novoValor && s[outro]) {
+      await moverParaRepertorio(s);
+      return;
+    }
     carregar();
   };
 
@@ -990,6 +1090,11 @@ function GerenciarSugestoes() {
                         {s.para}
                       </span>
                     )}
+                    {repertorio.has(normalizarNome(s.musica)) && (
+                      <span className="ml-2 text-[10px] uppercase tracking-wider text-emerald-300 border border-emerald-700 rounded-full px-2 py-0.5">
+                        ✓ já no repertório
+                      </span>
+                    )}
                   </p>
                   <p className="text-cream-muted text-sm truncate">
                     {s.artista || "Artista não informado"}
@@ -1001,12 +1106,19 @@ function GerenciarSugestoes() {
                   )}
                 </div>
                 <div className="flex gap-2 shrink-0">
-                  <button
-                    onClick={() => moverParaRepertorio(s)}
-                    className="px-3 py-1.5 rounded-lg border border-noir-700 text-xs text-cream-muted hover:text-gold-300 hover:border-gold-600 transition"
-                  >
-                    ✓ Aprendida
-                  </button>
+                  {(s.para ?? "Ambos") === "Ambos" ? (
+                    <>
+                      <BotaoConfirma rotulo="Gabs" ok={s.ok_gabs} onClick={() => confirmar(s, "ok_gabs")} />
+                      <BotaoConfirma rotulo="Mari" ok={s.ok_mari} onClick={() => confirmar(s, "ok_mari")} />
+                    </>
+                  ) : (
+                    <button
+                      onClick={() => moverParaRepertorio(s)}
+                      className="px-3 py-1.5 rounded-lg border border-noir-700 text-xs text-cream-muted hover:text-gold-300 hover:border-gold-600 transition"
+                    >
+                      ✓ Aprendida
+                    </button>
+                  )}
                   <button
                     onClick={() => excluir(s)}
                     className="px-3 py-1.5 rounded-lg border border-noir-700 text-xs text-cream-muted hover:text-red-400 hover:border-red-900 transition"
@@ -1025,6 +1137,24 @@ function GerenciarSugestoes() {
         )}
       </div>
     </div>
+  );
+}
+
+// Botão de confirmação individual (Gabs / Mari) das sugestões "Ambos"
+function BotaoConfirma({ rotulo, ok, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      title={ok ? `${rotulo} confirmou — toque para desfazer` : `Confirmar por ${rotulo}`}
+      className={`px-3 py-1.5 rounded-lg border text-xs transition ${
+        ok
+          ? "border-gold-600 text-gold-300 bg-noir-800"
+          : "border-noir-700 text-cream-muted hover:text-gold-300 hover:border-gold-600"
+      }`}
+    >
+      {ok ? "✓ " : ""}
+      {rotulo}
+    </button>
   );
 }
 
@@ -1611,6 +1741,9 @@ function AbaAcessos() {
 
 /* ------------------------- PEDIDOS ------------------------- */
 
+// Prefixo usado pelo modal público quando a música não está no repertório
+const PREFIXO_SUGESTAO = "[Sugestão]";
+
 function GerenciarPedidos({ onMudanca }) {
   const [pedidos, setPedidos] = useState([]);
   const [carregando, setCarregando] = useState(true);
@@ -1648,6 +1781,27 @@ function GerenciarPedidos({ onMudanca }) {
     if (!window.confirm("Excluir este pedido?")) return;
     const { error } = await supabase.from("pedidos").delete().eq("id", p.id);
     if (!error) carregar();
+  };
+
+  // Manda o pedido para a lista "Aprender" (para Ambos) e marca como atendido
+  const mandarParaAprender = async (p) => {
+    const texto = p.pedido.replace(PREFIXO_SUGESTAO, "").trim();
+    const [musica, artista] = texto.split(" — ");
+    if (!window.confirm(`Adicionar "${texto}" à lista de músicas para aprender?`)) return;
+
+    const { error } = await supabase.from("sugestoes").insert({
+      musica: musica.trim(),
+      artista: artista?.trim() || null,
+      mensagem: p.mensagem,
+      origem: "visitante",
+      para: "Ambos",
+    });
+    if (error) {
+      console.error(error);
+      return;
+    }
+    await supabase.from("pedidos").update({ atendido: true }).eq("id", p.id);
+    carregar();
   };
 
   const visiveis = pedidos.filter((p) =>
@@ -1698,7 +1852,12 @@ function GerenciarPedidos({ onMudanca }) {
             <li key={p.id} className="py-3 flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className={`truncate ${p.atendido ? "line-through text-cream-muted" : "text-cream"}`}>
-                  {p.pedido}
+                  {p.pedido.replace(PREFIXO_SUGESTAO, "").trim()}
+                  {p.pedido.startsWith(PREFIXO_SUGESTAO) && (
+                    <span className="ml-2 text-[10px] uppercase tracking-wider text-gold-300 border border-gold-600 rounded-full px-2 py-0.5">
+                      fora do repertório
+                    </span>
+                  )}
                 </p>
                 {p.mensagem && (
                   <p className="text-cream-muted text-sm break-words">💬 {p.mensagem}</p>
@@ -1708,6 +1867,15 @@ function GerenciarPedidos({ onMudanca }) {
                 </p>
               </div>
               <div className="flex gap-2 shrink-0">
+                {!p.atendido && p.pedido.startsWith(PREFIXO_SUGESTAO) && (
+                  <button
+                    onClick={() => mandarParaAprender(p)}
+                    title="Enviar para a lista de músicas para aprender"
+                    className="px-3 py-1.5 rounded-lg border border-gold-600 text-xs text-gold-300 hover:bg-noir-800 transition"
+                  >
+                    🎸 Aprender
+                  </button>
+                )}
                 <button
                   onClick={() => alternarAtendido(p)}
                   className="px-3 py-1.5 rounded-lg border border-noir-700 text-xs text-cream-muted hover:text-gold-300 hover:border-gold-600 transition"

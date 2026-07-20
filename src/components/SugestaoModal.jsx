@@ -31,6 +31,12 @@ export default function SugestaoModal({ aberto, musicaInicial, onFechar }) {
       setEnviando(true);
       setStatus("⏳ Enviando sugestão...");
 
+      // Vai para a lista de PEDIDOS do admin — lá o duo decide se a música
+      // entra na lista de aprender ou não
+      const textoPedido = `[Sugestão] ${musica.trim()}${
+        artista.trim() ? ` — ${artista.trim()}` : ""
+      }`.slice(0, 200);
+
       const resp = await fetch(PEDIDO_FUNCTION_URL, {
         method: "POST",
         headers: {
@@ -39,9 +45,7 @@ export default function SugestaoModal({ aberto, musicaInicial, onFechar }) {
           Authorization: `Bearer ${anonKey}`,
         },
         body: JSON.stringify({
-          tipo: "aprender",
-          musica: musica.trim(),
-          artista: artista.trim(),
+          pedido: textoPedido,
           mensagem: mensagem.trim(),
         }),
       });

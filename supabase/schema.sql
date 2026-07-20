@@ -207,6 +207,11 @@ create policy "cifras: delete autenticado"
   to authenticated
   using (bucket_id = 'cifras');
 
+-- ---------- Confirmação dupla nas sugestões "Ambos" ----------
+-- A música só vai ao repertório quando Gabs E Mari confirmarem
+alter table public.sugestoes add column if not exists ok_gabs boolean not null default false;
+alter table public.sugestoes add column if not exists ok_mari boolean not null default false;
+
 -- ---------- (Opcional) Repertório inicial ----------
 -- insert into public.musicas (nome, artista, estilo) values
 --   ('Trevo (Tu)', 'Anavitória', 'MPB'),
