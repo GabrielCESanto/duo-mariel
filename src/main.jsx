@@ -12,6 +12,20 @@ const Cifra = lazy(() => import("./pages/Cifra.jsx"));
 
 iniciarAnalytics();
 
+// O service worker (registerType: autoUpdate) troca de versão sozinho e
+// assume o controle da aba na hora (skipWaiting + clientsClaim), SEM
+// recarregar a página. Isso significa que o app que já estava rodando na
+// memória do aparelho continua de pé com os nomes de arquivo (hashes) do
+// deploy ANTERIOR — e assim que ele tentar carregar uma parte code-split
+// (como a tela de cifra), a busca cai num arquivo que o novo deploy já não
+// tem mais, e o import falha. Recarregar assim que o novo SW assume o
+// controle evita esse descompasso.
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    window.location.reload();
+  });
+}
+
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <ErrorBoundary>
