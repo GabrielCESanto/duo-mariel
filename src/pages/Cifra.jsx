@@ -508,89 +508,103 @@ export default function Cifra() {
 
   return (
     <div className={`${ALTURA_TELA_CLASSE} flex flex-col`}>
-      {/* Barra superior — todos os controles reunidos aqui */}
-      <header className="border-b border-noir-800 bg-noir-900/90 shrink-0 px-3 py-2 space-y-2">
-        <div className="flex items-center gap-2">
+      {/* Barra superior — controles numa linha, título/artista embaixo */}
+      <header className="border-b border-noir-800 bg-noir-900/90 shrink-0 px-3 py-3">
+        <div className="flex items-center justify-center gap-3 flex-wrap">
           <Link
             to="/admin?aba=cifras"
             className="shrink-0 h-14 px-4 flex items-center rounded-xl border border-noir-700 text-cream-muted text-base font-medium hover:text-gold-300 hover:border-gold-600 transition"
           >
             ‹ Voltar
           </Link>
-          <div className="min-w-0 flex-1 text-center px-1">
-            <p className="text-cream text-sm truncate">{musica?.nome}</p>
-            <p className="text-cream-muted text-xs truncate">{musica?.artista}</p>
-          </div>
+
+          {!erro && (
+            <>
+              <div className="w-px h-10 bg-noir-700 shrink-0" />
+
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={() =>
+                    setVelocidade((v) => Math.max(VELOCIDADE_MIN, v - VELOCIDADE_PASSO))
+                  }
+                  aria-label="Mais devagar"
+                  className="w-10 h-10 rounded-lg border border-noir-700 text-cream text-lg hover:border-gold-600 transition"
+                >
+                  −
+                </button>
+
+                <button
+                  onClick={() => setRodando((r) => !r)}
+                  aria-label={rodando ? "Pausar" : "Rolar"}
+                  className="btn-gold w-14 h-14 rounded-full text-2xl"
+                >
+                  {rodando ? "❚❚" : "▶"}
+                </button>
+
+                <button
+                  onClick={() =>
+                    setVelocidade((v) => Math.min(VELOCIDADE_MAX, v + VELOCIDADE_PASSO))
+                  }
+                  aria-label="Mais rápido"
+                  className="w-10 h-10 rounded-lg border border-noir-700 text-cream text-lg hover:border-gold-600 transition"
+                >
+                  +
+                </button>
+              </div>
+
+              <div className="w-px h-10 bg-noir-700 shrink-0" />
+
+              <div className="flex flex-col gap-1 shrink-0">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setZoom((z) => Math.min(ZOOM_MAX, +(z + 0.15).toFixed(2)))}
+                    aria-label="Aumentar zoom"
+                    className="w-9 h-7 rounded-md border border-noir-700 text-cream-muted text-xs hover:text-gold-300 transition"
+                  >
+                    A+
+                  </button>
+                  <span className="text-cream-muted text-[10px] tabular-nums">
+                    {Math.round(zoom * 100)}%
+                  </span>
+                  {resolucaoLimitada && (
+                    <span
+                      title="Nitidez reduzida neste zoom para não travar em aparelhos mais fracos"
+                      className="text-[10px] text-amber-400/80"
+                    >
+                      ◐
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setZoom((z) => Math.max(ZOOM_MIN, +(z - 0.15).toFixed(2)))}
+                    aria-label="Diminuir zoom"
+                    className="w-9 h-7 rounded-md border border-noir-700 text-cream-muted text-xs hover:text-gold-300 transition"
+                  >
+                    A−
+                  </button>
+                  <span className="text-cream-muted text-[10px] tabular-nums">
+                    {velocidade} px/s
+                  </span>
+                </div>
+              </div>
+            </>
+          )}
         </div>
 
-        {!erro && (
-          <div className="flex items-center justify-center gap-2 flex-wrap">
-            <button
-              onClick={() =>
-                setVelocidade((v) => Math.max(VELOCIDADE_MIN, v - VELOCIDADE_PASSO))
-              }
-              aria-label="Mais devagar"
-              className="w-10 h-10 rounded-lg border border-noir-700 text-cream text-lg hover:border-gold-600 transition shrink-0"
-            >
-              −
-            </button>
+        <div className="gold-rule my-3" />
 
-            <button
-              onClick={() => setRodando((r) => !r)}
-              aria-label={rodando ? "Pausar" : "Rolar"}
-              className="btn-gold w-14 h-14 rounded-full text-2xl shrink-0"
-            >
-              {rodando ? "❚❚" : "▶"}
-            </button>
-
-            <button
-              onClick={() =>
-                setVelocidade((v) => Math.min(VELOCIDADE_MAX, v + VELOCIDADE_PASSO))
-              }
-              aria-label="Mais rápido"
-              className="w-10 h-10 rounded-lg border border-noir-700 text-cream text-lg hover:border-gold-600 transition shrink-0"
-            >
-              +
-            </button>
-
-            <span className="text-cream-muted text-[10px] leading-tight w-10 text-center shrink-0">
-              {velocidade}
-              <br />
-              px/s
-            </span>
-
-            <div className="flex flex-col gap-1 shrink-0">
-              <button
-                onClick={() => setZoom((z) => Math.min(ZOOM_MAX, +(z + 0.15).toFixed(2)))}
-                aria-label="Aumentar zoom"
-                className="w-9 h-7 rounded-md border border-noir-700 text-cream-muted text-xs hover:text-gold-300 transition"
-              >
-                A+
-              </button>
-              <button
-                onClick={() => setZoom((z) => Math.max(ZOOM_MIN, +(z - 0.15).toFixed(2)))}
-                aria-label="Diminuir zoom"
-                className="w-9 h-7 rounded-md border border-noir-700 text-cream-muted text-xs hover:text-gold-300 transition"
-              >
-                A−
-              </button>
-            </div>
-
-            <div className="text-center leading-tight w-9 shrink-0">
-              <span className="text-cream-muted text-[10px] tabular-nums">
-                {Math.round(zoom * 100)}%
-              </span>
-              {resolucaoLimitada && (
-                <p
-                  title="Nitidez reduzida neste zoom para não travar em aparelhos mais fracos"
-                  className="text-[8px] text-amber-400/80 leading-none mt-0.5"
-                >
-                  ◐
-                </p>
-              )}
-            </div>
-          </div>
-        )}
+        <div className="min-w-0 text-center px-1 truncate">
+          <span className="font-display text-gold-300 text-base tracking-wide">
+            {musica?.nome}
+          </span>
+          {musica?.artista && (
+            <>
+              <span className="text-cream-muted mx-2">—</span>
+              <span className="text-cream-muted italic text-base">{musica.artista}</span>
+            </>
+          )}
+        </div>
       </header>
 
       {/* Área do PDF — toque alterna play/pause; pinça com 2 dedos dá zoom */}
