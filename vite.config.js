@@ -36,13 +36,19 @@ export default defineConfig({
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
         runtimeCaching: [
           {
-            // PDFs de cifras: uma vez abertos, ficam disponíveis offline
+            // PDFs de cifras: uma vez abertos, ficam disponíveis offline.
+            // Nome do cache com versão: bastante coisa travou/recarregou no
+            // meio de um download de cifra durante os testes, e o
+            // CacheFirst nunca revalida — se algum aparelho guardou uma
+            // resposta incompleta/corrompida, ficaria preso nela pra
+            // sempre. Trocar o nome invalida tudo o que já foi guardado,
+            // forçando um download limpo em qualquer aparelho.
             urlPattern: /supabase\.co\/storage\/v1\/object\/public\/cifras\/.*/i,
             handler: "CacheFirst",
             options: {
-              cacheName: "cifras",
+              cacheName: "cifras-v2",
               expiration: { maxEntries: 300 },
-              cacheableResponse: { statuses: [0, 200] },
+              cacheableResponse: { statuses: [200] },
             },
           },
           {
