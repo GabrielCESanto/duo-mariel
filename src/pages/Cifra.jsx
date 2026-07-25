@@ -566,7 +566,7 @@ export default function Cifra() {
               </div>
 
               <div
-                className="flex flex-col gap-1 justify-self-end"
+                className="flex items-center gap-2 justify-self-end"
                 title={
                   resolucaoLimitada
                     ? "Nitidez reduzida neste zoom para não travar em aparelhos mais fracos"
@@ -574,18 +574,18 @@ export default function Cifra() {
                 }
               >
                 <button
-                  onClick={() => setZoom((z) => Math.min(ZOOM_MAX, +(z + 0.15).toFixed(2)))}
-                  aria-label="Aumentar zoom"
-                  className="w-14 h-7 rounded-md border border-noir-700 text-cream-muted text-xs hover:text-gold-300 transition"
-                >
-                  A+
-                </button>
-                <button
                   onClick={() => setZoom((z) => Math.max(ZOOM_MIN, +(z - 0.15).toFixed(2)))}
                   aria-label="Diminuir zoom"
-                  className="w-14 h-7 rounded-md border border-noir-700 text-cream-muted text-xs hover:text-gold-300 transition"
+                  className="w-10 h-10 rounded-lg border border-noir-700 text-cream text-lg hover:border-gold-600 transition"
                 >
                   A−
+                </button>
+                <button
+                  onClick={() => setZoom((z) => Math.min(ZOOM_MAX, +(z + 0.15).toFixed(2)))}
+                  aria-label="Aumentar zoom"
+                  className="w-10 h-10 rounded-lg border border-noir-700 text-cream text-lg hover:border-gold-600 transition"
+                >
+                  A+
                 </button>
               </div>
             </>
