@@ -11,6 +11,11 @@ const VELOCIDADE_MAX = 120;
 const VELOCIDADE_PASSO = 5;
 const ZOOM_MIN = 0.6;
 const ZOOM_MAX = 2.5;
+// Resolução "nativa" da imagem renderizada — deliberadamente menor que
+// ZOOM_MAX. Zoom acima disso ainda funciona (só fica um pouco mais suave),
+// mas manter isso mais baixo reduz bastante o tempo de render+codificação
+// em CPU de celular, que é o gargalo real do carregamento.
+const ZOOM_RENDER_ALVO = 2.0;
 const TIMEOUT_CARREGAMENTO_MS = 15_000;
 const TIMEOUT_RENDER_PAGINA_MS = 20_000;
 
@@ -57,6 +62,7 @@ export default function Cifra() {
   const [zoom, setZoom] = useState(2); // abre em 200%
   const [renderizando, setRenderizando] = useState(true);
   const [resolucaoLimitada, setResolucaoLimitada] = useState(false);
+  const [progresso, setProgresso] = useState({ atual: 0, total: 0 }); // pra "Renderizando página X de Y"
 
   const scrollRef = useRef(null);
   const paginasRef = useRef(null);
@@ -115,17 +121,20 @@ export default function Cifra() {
       const larguraBase = Math.min(scrollRef.current?.clientWidth || window.innerWidth, 1000);
       const dpr = window.devicePixelRatio || 1;
       let algumaPaginaLimitada = false;
+      setProgresso({ atual: 0, total: doc.numPages });
 
       for (let i = 1; i <= doc.numPages; i++) {
         if (renderIdRef.current !== meuRender || !montadoRef.current) return;
+        setProgresso({ atual: i, total: doc.numPages });
 
         const pagina = await doc.getPage(i);
         const base = pagina.getViewport({ scale: 1 });
 
-        // Renderiza numa resolução alta o bastante pra cobrir o zoom MÁXIMO
+        // Renderiza numa resolução alta o bastante pra cobrir o zoom "alvo"
         // com nitidez — depois disso o zoom nunca mais toca o canvas de
-        // novo, só redimensiona a imagem já pronta via CSS
-        let escalaRender = (larguraBase * ZOOM_MAX * dpr) / base.width;
+        // novo, só redimensiona a imagem já pronta via CSS (zoom acima do
+        // alvo ainda funciona, só fica um pouco mais suave)
+        let escalaRender = (larguraBase * ZOOM_RENDER_ALVO * dpr) / base.width;
         const MAX_PIXELS = 12_000_000;
         const MAX_DIMENSAO = 4096;
         const pixels = base.width * escalaRender * (base.height * escalaRender);
@@ -162,9 +171,13 @@ export default function Cifra() {
         if (renderIdRef.current !== meuRender || !montadoRef.current) return;
 
         // Converte pra imagem e descarta o canvas — imagem é bem mais leve
-        // e resistente na GPU de celular que canvas ao vivo
+        // e resistente na GPU de celular que canvas ao vivo. JPEG em vez de
+        // PNG: para uma página cheia de texto/detalhe (o pior caso pra
+        // compressão sem perdas), codificar em PNG é MUITO mais lento —
+        // era o principal motivo do carregamento demorar tanto em CPU de
+        // celular. Em qualidade alta o texto continua nítido.
         const blob = await Promise.race([
-          new Promise((resolve) => canvas.toBlob(resolve, "image/png")),
+          new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92)),
           new Promise((_, rejeitar) =>
             setTimeout(() => rejeitar(new Error("RENDER_TRAVADO")), TIMEOUT_RENDER_PAGINA_MS)
           ),
@@ -187,6 +200,11 @@ export default function Cifra() {
           return;
         }
         container.appendChild(img);
+
+        // Devolve o controle ao navegador entre páginas — sem isso, o toque
+        // e a rolagem ficavam sem resposta até TODAS as páginas terminarem,
+        // mesmo com a primeira já visível na tela
+        await new Promise((resolve) => requestAnimationFrame(resolve));
       }
 
       if (renderIdRef.current === meuRender && montadoRef.current) {
@@ -595,7 +613,9 @@ export default function Cifra() {
           <>
             {renderizando && (
               <p className="text-cream-muted text-center py-8 text-sm">
-                Carregando cifra...
+                {progresso.total > 0
+                  ? `Preparando página ${progresso.atual} de ${progresso.total}...`
+                  : "Carregando cifra..."}
               </p>
             )}
             <div ref={paginasRef} className="mx-auto" style={{ width: `${zoom * 100}%` }} />
