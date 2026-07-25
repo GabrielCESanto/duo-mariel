@@ -9,7 +9,10 @@ const cache = new Map();
 // Depois que a via direta falha uma vez (iOS), vai sempre pelo proxy
 let usarSomenteProxy = false;
 
-async function buscarNoItunes(termo, limite) {
+// Tentativa "crua": direta (desktop/Android) ou via proxy (iOS). Lança se as
+// duas falharem — quem chama decide se quer tratar isso como "sem resultado"
+// ou precisa distinguir falha de "não encontrado" (ver existeNoItunes abaixo).
+async function buscarNoItunesOuFalhar(termo, limite) {
   const params = `term=${encodeURIComponent(termo)}&media=music&entity=song&limit=${limite}&country=BR`;
 
   // 1) Tentativa direta (funciona em desktop/Android)
@@ -24,19 +27,26 @@ async function buscarNoItunes(termo, limite) {
   }
 
   // 2) Proxy via edge function (necessário no iOS)
-  if (!supabaseConfigured) return [];
+  if (!supabaseConfigured) throw new Error("Proxy indisponível (Supabase não configurado)");
+
+  const resp = await fetch(PEDIDO_FUNCTION_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      apikey: anonKey,
+      Authorization: `Bearer ${anonKey}`,
+    },
+    body: JSON.stringify({ tipo: "itunes", termo, limite }),
+  });
+  if (!resp.ok) throw new Error(`Proxy respondeu ${resp.status}`);
+  return (await resp.json()).results ?? [];
+}
+
+// Versão tolerante a falha — usada pelos fluxos que preferem "nada
+// encontrado" a um erro (preview, autocomplete de cadastro)
+async function buscarNoItunes(termo, limite) {
   try {
-    const resp = await fetch(PEDIDO_FUNCTION_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        apikey: anonKey,
-        Authorization: `Bearer ${anonKey}`,
-      },
-      body: JSON.stringify({ tipo: "itunes", termo, limite }),
-    });
-    if (!resp.ok) return [];
-    return (await resp.json()).results ?? [];
+    return await buscarNoItunesOuFalhar(termo, limite);
   } catch (e) {
     console.error("Erro ao buscar no iTunes:", e);
     return [];
@@ -58,36 +68,14 @@ export async function buscarPreview(nome, artista) {
 // Retorna true/false, ou null quando a checagem falhou (rede, limite da API) —
 // nesse caso não dá para afirmar que a música não existe.
 export async function existeNoItunes(nome, artista) {
-  const params =
-    `term=${encodeURIComponent(`${nome} ${artista ?? ""}`.trim())}` +
-    `&media=music&entity=song&limit=1&country=BR`;
+  const termo = `${nome} ${artista ?? ""}`.trim();
+  if (!termo) return null;
 
   try {
-    const resp = await fetch(`https://itunes.apple.com/search?${params}`);
-    if (resp.ok) return ((await resp.json()).results ?? []).length > 0;
+    const resultados = await buscarNoItunesOuFalhar(termo, 1);
+    return resultados.length > 0;
   } catch {
-    // segue para o proxy
-  }
-
-  if (!supabaseConfigured) return null;
-  try {
-    const resp = await fetch(PEDIDO_FUNCTION_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        apikey: anonKey,
-        Authorization: `Bearer ${anonKey}`,
-      },
-      body: JSON.stringify({
-        tipo: "itunes",
-        termo: `${nome} ${artista ?? ""}`.trim(),
-        limite: 1,
-      }),
-    });
-    if (!resp.ok) return null;
-    return ((await resp.json()).results ?? []).length > 0;
-  } catch {
-    return null;
+    return null; // falha de rede/limite — não dá pra afirmar que não existe
   }
 }
 

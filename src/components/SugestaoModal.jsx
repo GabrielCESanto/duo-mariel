@@ -7,6 +7,7 @@ export default function SugestaoModal({ aberto, musicaInicial, onFechar }) {
   const [mensagem, setMensagem] = useState("");
   const [status, setStatus] = useState("");
   const [enviando, setEnviando] = useState(false);
+  const [enviado, setEnviado] = useState(false);
 
   useEffect(() => {
     if (aberto) {
@@ -14,13 +15,14 @@ export default function SugestaoModal({ aberto, musicaInicial, onFechar }) {
       setArtista("");
       setMensagem("");
       setStatus("");
+      setEnviado(false);
     }
   }, [aberto, musicaInicial]);
 
   if (!aberto) return null;
 
   const enviar = async () => {
-    if (!musica.trim()) return;
+    if (!musica.trim() || enviando || enviado) return;
 
     if (!supabaseConfigured) {
       setStatus("⚠️ Sugestões ainda não configuradas. Fale conosco pelo WhatsApp!");
@@ -53,6 +55,7 @@ export default function SugestaoModal({ aberto, musicaInicial, onFechar }) {
       if (!resp.ok) throw new Error(await resp.text());
 
       setStatus("✅ Sugestão enviada! Quem sabe ela entra no repertório 🎶");
+      setEnviado(true);
       setTimeout(onFechar, 1400);
     } catch (e) {
       console.error("Erro ao enviar sugestão:", e);
@@ -116,11 +119,11 @@ export default function SugestaoModal({ aberto, musicaInicial, onFechar }) {
             Cancelar
           </button>
           <button
-            className="btn-gold px-5 py-2 rounded-xl text-sm"
+            className="btn-gold px-5 py-2 rounded-xl text-sm disabled:opacity-60"
             onClick={enviar}
-            disabled={enviando || !musica.trim()}
+            disabled={enviando || enviado || !musica.trim()}
           >
-            Enviar sugestão
+            {enviado ? "Enviada ✓" : "Enviar sugestão"}
           </button>
         </div>
       </div>

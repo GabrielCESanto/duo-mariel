@@ -1,6 +1,13 @@
-import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { supabase, supabaseConfigured } from "../lib/supabase";
+import {
+  assinarDownloadCifras,
+  baixarCifrasEmCache,
+  cancelarDownloadCifras,
+  estadoDownloadCifras,
+} from "../lib/cifraCache";
+import Afinador from "../components/Afinador";
 import { GOATCOUNTER_CODE } from "../config";
 import { buscarMusicasApi, existeNoItunes } from "../lib/preview";
 
@@ -11,7 +18,11 @@ const normalizarNome = (s) =>
   String(s ?? "")
     .toLowerCase()
     .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
+    // Remove os acentos (as marcas combinantes que o NFD separa das letras),
+    // usando os pontos de código Unicode por extenso em vez de caracteres
+    // combinantes literais no fonte — esses são invisíveis no editor e
+    // quebrariam silenciosamente se alguma ferramenta reescrever o arquivo.
+    .replace(new RegExp("[\\u0300-\\u036f]", "g"), "")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
 
@@ -153,8 +164,10 @@ function Login() {
 }
 
 function Painel() {
-  const [aba, setAba] = useState("musicas");
+  const [searchParams] = useSearchParams();
+  const [aba, setAba] = useState(searchParams.get("aba") || "musicas");
   const [pendentes, setPendentes] = useState(0);
+  const [pedidoNovo, setPedidoNovo] = useState(null);
 
   const contarPendentes = async () => {
     const { count, error } = await supabase
@@ -170,8 +183,48 @@ function Painel() {
     return () => clearInterval(timer);
   }, []);
 
+  // Avisa em tempo real quando um pedido novo chega, em qualquer aba do
+  // painel (requer o Realtime ligado na tabela "pedidos" no Supabase)
+  useEffect(() => {
+    const canal = supabase
+      .channel("pedidos-novos")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "pedidos" },
+        ({ new: novo }) => {
+          setPedidoNovo(novo);
+          contarPendentes();
+        }
+      )
+      .subscribe((status, err) => {
+        // Se o Realtime não estiver habilitado na tabela "pedidos" (Database
+        // > Replication, no painel do Supabase), a inscrição fica "fechada"
+        // silenciosamente — sem isso no console, é difícil descobrir por quê
+        // o pop-up de pedido novo nunca aparece.
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+          console.warn(
+            `Realtime de pedidos não conectou (${status}). Verifique se a` +
+              ` tabela "pedidos" tem Realtime habilitado no Supabase.`,
+            err
+          );
+        }
+      });
+    return () => supabase.removeChannel(canal);
+  }, []);
+
   return (
     <div>
+      {pedidoNovo && (
+        <NovoPedidoPopup
+          pedido={pedidoNovo}
+          onFechar={() => setPedidoNovo(null)}
+          onVerPedidos={() => {
+            setPedidoNovo(null);
+            setAba("pedidos");
+          }}
+        />
+      )}
+
       <div className="flex flex-wrap gap-2 mb-6">
         <AbaBotao ativa={aba === "musicas"} onClick={() => setAba("musicas")}>
           Músicas
@@ -184,6 +237,9 @@ function Painel() {
         </AbaBotao>
         <AbaBotao ativa={aba === "agenda"} onClick={() => setAba("agenda")}>
           Agenda
+        </AbaBotao>
+        <AbaBotao ativa={aba === "afinador"} onClick={() => setAba("afinador")}>
+          Afinador
         </AbaBotao>
         <AbaBotao ativa={aba === "videos"} onClick={() => setAba("videos")}>
           Vídeos
@@ -207,9 +263,59 @@ function Painel() {
       {aba === "cifras" && <AbaCifras />}
       {aba === "aprender" && <GerenciarSugestoes />}
       {aba === "agenda" && <GerenciarAgenda />}
+      {aba === "afinador" && <Afinador />}
       {aba === "videos" && <GerenciarVideos />}
       {aba === "pedidos" && <GerenciarPedidos onMudanca={contarPendentes} />}
       {aba === "acessos" && <AbaAcessos />}
+    </div>
+  );
+}
+
+// Aviso no centro da tela quando um pedido novo chega (via Realtime)
+function NovoPedidoPopup({ pedido, onFechar, onVerPedidos }) {
+  useEffect(() => {
+    // some sozinho depois de um tempo, se ninguém interagir
+    const timer = setTimeout(onFechar, 15_000);
+    return () => clearTimeout(timer);
+  }, [onFechar]);
+
+  const ehSugestao = pedido.pedido.startsWith("[Sugestão]");
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[60] p-4"
+      onClick={onFechar}
+    >
+      <div
+        className="w-full max-w-sm rounded-2xl border border-gold-600 bg-noir-900 p-6 text-center"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <p className="text-4xl mb-2">🎶</p>
+        <h3 className="section-title text-base mb-1">Pedido novo chegou!</h3>
+        <p className="text-cream text-lg mt-3 break-words">
+          {pedido.pedido.replace("[Sugestão]", "").trim()}
+        </p>
+        {ehSugestao && (
+          <p className="text-gold-300 text-xs mt-1 uppercase tracking-wider">
+            fora do repertório
+          </p>
+        )}
+        {pedido.mensagem && (
+          <p className="text-cream-muted mt-2 break-words">💬 {pedido.mensagem}</p>
+        )}
+
+        <div className="mt-5 flex gap-3 justify-center">
+          <button
+            onClick={onFechar}
+            className="px-4 py-2 rounded-xl bg-noir-800 border border-noir-700 hover:bg-noir-700 text-sm transition"
+          >
+            Fechar
+          </button>
+          <button onClick={onVerPedidos} className="btn-gold px-5 py-2 rounded-xl text-sm">
+            Ver pedidos
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -240,7 +346,6 @@ function GerenciarMusicas() {
   const [status, setStatus] = useState("");
   const [enviandoCifraId, setEnviandoCifraId] = useState(null);
   const [filtroCifra, setFiltroCifra] = useState("todas"); // todas | com | sem
-  const navigate = useNavigate();
 
   // --- Checagem no iTunes (resultado fica salvo no navegador) ---
   const [filtroItunes, setFiltroItunes] = useState(false);
@@ -284,6 +389,8 @@ function GerenciarMusicas() {
   const [sugestoesApi, setSugestoesApi] = useState([]);
   const [buscandoApi, setBuscandoApi] = useState(false);
   const escolhaRef = useState({ atual: "" })[0];
+  // Descarta resultados de buscas antigas que respondam fora de ordem
+  const buscaApiRef = useRef(0);
 
   useEffect(() => {
     const q = form.nome.trim();
@@ -294,8 +401,10 @@ function GerenciarMusicas() {
       return;
     }
     setBuscandoApi(true);
+    const minhaBusca = ++buscaApiRef.current;
     const timer = setTimeout(async () => {
       const resultados = await buscarMusicasApi(q);
+      if (buscaApiRef.current !== minhaBusca) return;
       setSugestoesApi(resultados);
       setBuscandoApi(false);
     }, 450);
@@ -737,24 +846,48 @@ function BotaoOuvir({ url }) {
 
 /* ------------------------- CIFRAS ------------------------- */
 
+// Sorteia `n` itens distintos de uma lista
+function sortearItens(lista, n) {
+  const copia = [...lista];
+  for (let i = copia.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copia[i], copia[j]] = [copia[j], copia[i]];
+  }
+  return copia.slice(0, n);
+}
+
 function AbaCifras() {
   const [musicas, setMusicas] = useState([]);
   const [carregando, setCarregando] = useState(true);
   const [filtro, setFiltro] = useState("");
+  const [aleatorias, setAleatorias] = useState([]);
+  const [progresso, setProgresso] = useState(() => estadoDownloadCifras());
+  const [modalAberto, setModalAberto] = useState(false);
   const navigate = useNavigate();
 
-  useEffect(() => {
+  const carregar = () =>
     supabase
       .from("musicas")
       .select("id, nome, artista, estilo, cifra_path")
       .not("cifra_path", "is", null)
-      .order("artista")
       .order("nome")
+      .order("artista")
       .then(({ data, error }) => {
         if (!error) setMusicas(data ?? []);
         setCarregando(false);
       });
+
+  useEffect(() => {
+    carregar();
   }, []);
+
+  useEffect(() => {
+    if (musicas.length > 0) setAleatorias(sortearItens(musicas, 5));
+  }, [musicas]);
+
+  // Acompanha o download mesmo que ele tenha começado antes desta aba
+  // remontar (o estado vive fora do componente, em src/lib/cifraCache.js)
+  useEffect(() => assinarDownloadCifras(setProgresso), []);
 
   const visiveis = musicas.filter((m) => {
     const q = filtro.trim().toLowerCase();
@@ -762,14 +895,31 @@ function AbaCifras() {
     return `${m.nome} ${m.artista} ${m.estilo ?? ""}`.toLowerCase().includes(q);
   });
 
+  const cliqueBaixar = () => {
+    if (!progresso.baixando) baixarCifrasEmCache(musicas);
+    setModalAberto(true);
+  };
+
   return (
     <div className="border border-noir-700 rounded-2xl p-5 bg-noir-900/50">
-      <div className="flex items-center justify-between gap-4 mb-3">
+      <div className="flex items-center justify-between gap-4 mb-3 flex-wrap">
         <h2 className="section-title text-sm">Cifras ({musicas.length})</h2>
-        <span className="text-xs text-cream-muted">
-          Dica: abra as cifras do show com internet — elas ficam salvas offline.
-        </span>
+        <button
+          onClick={cliqueBaixar}
+          disabled={musicas.length === 0}
+          title="Guarda o PDF de todas as cifras no cache do navegador, para uso offline no show"
+          className="px-3 py-1.5 rounded-lg border border-noir-700 text-xs text-cream-muted hover:text-gold-300 hover:border-gold-600 transition disabled:opacity-40"
+        >
+          {progresso.baixando ? `⏳ Baixando ${progresso.feito}/${progresso.total}` : "Baixar"}
+        </button>
       </div>
+      <p className="text-xs text-cream-muted mb-3">
+        Dica: abra as cifras do show com internet — elas ficam salvas offline.
+      </p>
+
+      {modalAberto && (
+        <ModalDownloadCifras progresso={progresso} onFechar={() => setModalAberto(false)} />
+      )}
 
       <input
         className="input-noir mb-2"
@@ -808,6 +958,94 @@ function AbaCifras() {
           )}
         </ul>
       )}
+
+      {/* Cifras aleatórias — sugestão rápida para praticar */}
+      {aleatorias.length > 0 && (
+        <div className="mt-5 pt-4 border-t border-noir-800">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-xs uppercase tracking-wider text-cream-muted">
+              5 cifras aleatórias
+            </h3>
+            <button
+              onClick={() => setAleatorias(sortearItens(musicas, 5))}
+              className="text-xs text-cream-muted hover:text-gold-300 transition"
+            >
+              🔀 Mudar
+            </button>
+          </div>
+          <ul className="divide-y divide-noir-800">
+            {aleatorias.map((m) => (
+              <li key={m.id}>
+                <button
+                  onClick={() => navigate(`/cifra/${m.id}`)}
+                  className="w-full py-2.5 flex items-center justify-between gap-3 text-left hover:bg-noir-800/50 rounded-lg px-2 -mx-2 transition"
+                >
+                  <div className="min-w-0">
+                    <p className="text-cream truncate text-sm">{m.nome}</p>
+                    <p className="text-cream-muted text-xs truncate">
+                      {m.artista}
+                      {m.estilo ? ` • ${m.estilo}` : ""}
+                    </p>
+                  </div>
+                  <span className="shrink-0 text-gold-300 text-xs">🎼 Abrir ›</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Modal com o progresso do download de todas as cifras — pode ser deixado
+// rodando em segundo plano (o download continua, só a janela some) ou
+// cancelado de verdade (aborta a requisição em andamento)
+function ModalDownloadCifras({ progresso, onFechar }) {
+  const { baixando, feito, total, ok, cancelado } = progresso;
+  const percentual = total > 0 ? Math.round((feito / total) * 100) : 0;
+
+  return (
+    <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="w-full max-w-sm rounded-2xl border border-noir-700 bg-noir-900 p-6">
+        <h3 className="section-title text-base mb-1">
+          {baixando ? "Baixando cifras..." : cancelado ? "Download cancelado" : "Download concluído"}
+        </h3>
+        <p className="text-cream-muted text-sm mb-4">
+          {feito}/{total} cifras verificadas{!baixando && ` — ${ok} salvas em cache`}
+        </p>
+
+        <div className="h-2.5 rounded-full bg-noir-800 overflow-hidden">
+          <div
+            className="h-full bg-gold-500 transition-all"
+            style={{ width: `${percentual}%` }}
+          />
+        </div>
+        <p className="text-cream-muted/60 text-xs mt-1.5 text-right">{percentual}%</p>
+
+        <div className="mt-6 flex gap-3 justify-end">
+          {baixando ? (
+            <>
+              <button
+                onClick={() => {
+                  cancelarDownloadCifras();
+                  onFechar();
+                }}
+                className="px-4 py-2 rounded-xl border border-noir-700 text-sm text-cream-muted hover:text-red-400 hover:border-red-900 transition"
+              >
+                Cancelar
+              </button>
+              <button onClick={onFechar} className="btn-gold px-5 py-2 rounded-xl text-sm">
+                Rodar em segundo plano
+              </button>
+            </>
+          ) : (
+            <button onClick={onFechar} className="btn-gold px-5 py-2 rounded-xl text-sm">
+              Fechar
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -828,6 +1066,8 @@ function GerenciarSugestoes() {
   const [sugestoesApi, setSugestoesApi] = useState([]);
   const [buscandoApi, setBuscandoApi] = useState(false);
   const escolhaRef = useState({ atual: "" })[0];
+  // Descarta resultados de buscas antigas que respondam fora de ordem
+  const buscaApiRef = useRef(0);
 
   useEffect(() => {
     const q = form.musica.trim();
@@ -837,8 +1077,10 @@ function GerenciarSugestoes() {
       return;
     }
     setBuscandoApi(true);
+    const minhaBusca = ++buscaApiRef.current;
     const timer = setTimeout(async () => {
       const resultados = await buscarMusicasApi(q);
+      if (buscaApiRef.current !== minhaBusca) return;
       setSugestoesApi(resultados);
       setBuscandoApi(false);
     }, 450);
@@ -1656,12 +1898,17 @@ function AbaAcessos() {
       ["7 dias", dataIso(6)],
       ["30 dias", dataIso(29)],
     ];
-    const resultado = [];
-    for (const [rotulo, inicio] of periodos) {
-      const publico = await contarAcessos("/", inicio);
-      const admin = await contarAcessos("/admin", inicio);
-      resultado.push({ rotulo, publico, admin });
-    }
+    // As 6 chamadas são independentes — paralelizar deixa o carregamento
+    // bem mais rápido do que esperar uma de cada vez
+    const resultado = await Promise.all(
+      periodos.map(async ([rotulo, inicio]) => {
+        const [publico, admin] = await Promise.all([
+          contarAcessos("/", inicio),
+          contarAcessos("/admin", inicio),
+        ]);
+        return { rotulo, publico, admin };
+      })
+    );
     if (resultado.every((r) => r.publico === null && r.admin === null)) {
       setErro(true);
       return;
@@ -1744,20 +1991,42 @@ function AbaAcessos() {
 // Prefixo usado pelo modal público quando a música não está no repertório
 const PREFIXO_SUGESTAO = "[Sugestão]";
 
+// Extrai o nome da música (antes do " — artista") de um texto de pedido
+const nomeDoPedido = (textoPedido) =>
+  textoPedido.replace(PREFIXO_SUGESTAO, "").trim().split(" — ")[0].trim();
+
 function GerenciarPedidos({ onMudanca }) {
   const [pedidos, setPedidos] = useState([]);
   const [carregando, setCarregando] = useState(true);
   const [mostrar, setMostrar] = useState("pendentes"); // pendentes | atendidos
+  // Contagem separada (query leve, sem limite) — evita o badge dizer "12
+  // pendentes" enquanto a lista, limitada, mostra só alguns deles
+  const [contagens, setContagens] = useState({ pendentes: 0, atendidos: 0 });
+  const [cifraPorNome, setCifraPorNome] = useState({});
+  const [pedidoAberto, setPedidoAberto] = useState(null);
+  const navigate = useNavigate();
+
+  const atualizarContagens = async () => {
+    const [{ count: pendentes }, { count: atendidos }] = await Promise.all([
+      supabase.from("pedidos").select("*", { count: "exact", head: true }).eq("atendido", false),
+      supabase.from("pedidos").select("*", { count: "exact", head: true }).eq("atendido", true),
+    ]);
+    setContagens({ pendentes: pendentes ?? 0, atendidos: atendidos ?? 0 });
+  };
 
   const carregar = async (mostrarLoading = true) => {
     if (mostrarLoading) setCarregando(true);
+    // Pendentes é a fila de trabalho: busca todos. Atendidos é só histórico:
+    // limita a 100 para não pesar a consulta.
     const { data, error } = await supabase
       .from("pedidos")
       .select("*")
+      .eq("atendido", mostrar === "atendidos")
       .order("created_at", { ascending: false })
-      .limit(100);
+      .limit(mostrar === "atendidos" ? 100 : 500);
     if (!error) setPedidos(data ?? []);
     setCarregando(false);
+    atualizarContagens();
     onMudanca?.();
   };
 
@@ -1767,7 +2036,23 @@ function GerenciarPedidos({ onMudanca }) {
     const timer = setInterval(() => carregar(false), 20_000);
     return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mostrar]);
+
+  useEffect(() => {
+    // Mapa nome→cifra, para o botão "Ver cifra" no detalhe do pedido
+    supabase
+      .from("musicas")
+      .select("id, nome")
+      .not("cifra_path", "is", null)
+      .then(({ data, error }) => {
+        if (error) return;
+        const mapa = {};
+        for (const m of data ?? []) mapa[normalizarNome(m.nome)] = m.id;
+        setCifraPorNome(mapa);
+      });
   }, []);
+
+  const cifraDoPedido = (p) => cifraPorNome[normalizarNome(nomeDoPedido(p.pedido))];
 
   const alternarAtendido = async (p) => {
     const { error } = await supabase
@@ -1804,10 +2089,6 @@ function GerenciarPedidos({ onMudanca }) {
     carregar();
   };
 
-  const visiveis = pedidos.filter((p) =>
-    mostrar === "pendentes" ? !p.atendido : p.atendido
-  );
-
   return (
     <div className="border border-noir-700 rounded-2xl p-5 bg-noir-900/50">
       <div className="flex items-center justify-between mb-4">
@@ -1830,7 +2111,7 @@ function GerenciarPedidos({ onMudanca }) {
               : "border-noir-700 text-cream-muted hover:text-cream"
           }`}
         >
-          Pendentes ({pedidos.filter((p) => !p.atendido).length})
+          Pendentes ({contagens.pendentes})
         </button>
         <button
           onClick={() => setMostrar("atendidos")}
@@ -1840,7 +2121,7 @@ function GerenciarPedidos({ onMudanca }) {
               : "border-noir-700 text-cream-muted hover:text-cream"
           }`}
         >
-          Atendidos ({pedidos.filter((p) => p.atendido).length})
+          Atendidos ({contagens.atendidos})
         </button>
       </div>
 
@@ -1848,50 +2129,45 @@ function GerenciarPedidos({ onMudanca }) {
         <p className="text-cream-muted text-sm py-4">Carregando...</p>
       ) : (
         <ul className="divide-y divide-noir-800">
-          {visiveis.map((p) => (
-            <li key={p.id} className="py-3 flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className={`truncate ${p.atendido ? "line-through text-cream-muted" : "text-cream"}`}>
-                  {p.pedido.replace(PREFIXO_SUGESTAO, "").trim()}
-                  {p.pedido.startsWith(PREFIXO_SUGESTAO) && (
-                    <span className="ml-2 text-[10px] uppercase tracking-wider text-gold-300 border border-gold-600 rounded-full px-2 py-0.5">
-                      fora do repertório
-                    </span>
+          {pedidos.map((p) => (
+            <li key={p.id} className="flex items-start gap-2">
+              <button
+                onClick={() => setPedidoAberto(p)}
+                className="flex-1 min-w-0 py-3 flex items-start justify-between gap-3 text-left hover:bg-noir-800/50 rounded-lg px-2 -mx-2 transition"
+              >
+                <div className="min-w-0">
+                  <p className={`truncate ${p.atendido ? "line-through text-cream-muted" : "text-cream"}`}>
+                    {p.pedido.replace(PREFIXO_SUGESTAO, "").trim()}
+                    {p.pedido.startsWith(PREFIXO_SUGESTAO) && (
+                      <span className="ml-2 text-[10px] uppercase tracking-wider text-gold-300 border border-gold-600 rounded-full px-2 py-0.5">
+                        fora do repertório
+                      </span>
+                    )}
+                  </p>
+                  {p.mensagem && (
+                    <p className="text-cream-muted text-sm break-words">💬 {p.mensagem}</p>
                   )}
-                </p>
-                {p.mensagem && (
-                  <p className="text-cream-muted text-sm break-words">💬 {p.mensagem}</p>
-                )}
-                <p className="text-cream-muted/60 text-xs mt-1">
-                  {new Date(p.created_at).toLocaleString("pt-BR")}
-                </p>
-              </div>
-              <div className="flex gap-2 shrink-0">
-                {!p.atendido && p.pedido.startsWith(PREFIXO_SUGESTAO) && (
-                  <button
-                    onClick={() => mandarParaAprender(p)}
-                    title="Enviar para a lista de músicas para aprender"
-                    className="px-3 py-1.5 rounded-lg border border-gold-600 text-xs text-gold-300 hover:bg-noir-800 transition"
-                  >
-                    🎸 Aprender
-                  </button>
-                )}
+                  <p className="text-cream-muted/60 text-xs mt-1">
+                    {new Date(p.created_at).toLocaleString("pt-BR")}
+                  </p>
+                </div>
+                <span className="shrink-0 text-gold-300 text-sm">Ver ›</span>
+              </button>
+              {!p.atendido && p.pedido.startsWith(PREFIXO_SUGESTAO) && (
                 <button
-                  onClick={() => alternarAtendido(p)}
-                  className="px-3 py-1.5 rounded-lg border border-noir-700 text-xs text-cream-muted hover:text-gold-300 hover:border-gold-600 transition"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    mandarParaAprender(p);
+                  }}
+                  title="Enviar para a lista de músicas para aprender"
+                  className="shrink-0 self-center px-3 py-1.5 rounded-lg border border-gold-600 text-xs text-gold-300 hover:bg-noir-800 transition"
                 >
-                  {p.atendido ? "Reabrir" : "✓ Atendido"}
+                  🎸 Aprender
                 </button>
-                <button
-                  onClick={() => excluir(p)}
-                  className="px-3 py-1.5 rounded-lg border border-noir-700 text-xs text-cream-muted hover:text-red-400 hover:border-red-900 transition"
-                >
-                  Excluir
-                </button>
-              </div>
+              )}
             </li>
           ))}
-          {visiveis.length === 0 && (
+          {pedidos.length === 0 && (
             <li className="py-4 text-cream-muted text-sm">
               {mostrar === "pendentes"
                 ? "Nenhum pedido pendente. 🎉"
@@ -1900,6 +2176,129 @@ function GerenciarPedidos({ onMudanca }) {
           )}
         </ul>
       )}
+
+      {pedidoAberto && (
+        <DetalhePedidoModal
+          pedido={pedidoAberto}
+          cifraId={cifraDoPedido(pedidoAberto)}
+          onFechar={() => setPedidoAberto(null)}
+          onVerCifra={(id) => {
+            setPedidoAberto(null);
+            navigate(`/cifra/${id}`);
+          }}
+          onAprender={(p) => {
+            mandarParaAprender(p);
+            setPedidoAberto(null);
+          }}
+          onAlternarAtendido={(p) => {
+            alternarAtendido(p);
+            setPedidoAberto(null);
+          }}
+          onExcluir={(p) => {
+            excluir(p);
+            setPedidoAberto(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// Modal com todas as informações do pedido, aberto ao tocar num item da lista
+function DetalhePedidoModal({
+  pedido: p,
+  cifraId,
+  onFechar,
+  onVerCifra,
+  onAprender,
+  onAlternarAtendido,
+  onExcluir,
+}) {
+  const ehSugestao = p.pedido.startsWith(PREFIXO_SUGESTAO);
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+      onClick={onFechar}
+    >
+      <div
+        className="w-full max-w-md rounded-2xl border border-noir-700 bg-noir-900 p-6"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h3 className="section-title text-base">Detalhes do pedido</h3>
+            <div className="flex items-center gap-2 mt-1 flex-wrap">
+              {ehSugestao && (
+                <span className="text-[10px] uppercase tracking-wider text-gold-300 border border-gold-600 rounded-full px-2 py-0.5">
+                  fora do repertório
+                </span>
+              )}
+              <span
+                className={`text-[10px] uppercase tracking-wider rounded-full px-2 py-0.5 border ${
+                  p.atendido
+                    ? "text-emerald-300 border-emerald-700"
+                    : "text-amber-300 border-amber-700"
+                }`}
+              >
+                {p.atendido ? "atendido" : "pendente"}
+              </span>
+            </div>
+          </div>
+          <button
+            onClick={onFechar}
+            aria-label="Fechar"
+            className="text-cream-muted hover:text-cream text-lg leading-none shrink-0"
+          >
+            ✕
+          </button>
+        </div>
+
+        <p className="text-cream text-lg mt-4 break-words">
+          {p.pedido.replace(PREFIXO_SUGESTAO, "").trim()}
+        </p>
+
+        {p.mensagem && (
+          <p className="text-cream-muted mt-3 break-words whitespace-pre-wrap">
+            💬 {p.mensagem}
+          </p>
+        )}
+
+        <p className="text-cream-muted/60 text-xs mt-4">
+          {new Date(p.created_at).toLocaleString("pt-BR")}
+        </p>
+
+        <div className="mt-5 flex flex-wrap gap-2 justify-end">
+          {cifraId && (
+            <button
+              onClick={() => onVerCifra(cifraId)}
+              className="btn-gold px-4 py-2 rounded-xl text-sm"
+            >
+              🎼 Ver cifra
+            </button>
+          )}
+          {!p.atendido && ehSugestao && (
+            <button
+              onClick={() => onAprender(p)}
+              className="px-4 py-2 rounded-xl border border-gold-600 text-sm text-gold-300 hover:bg-noir-800 transition"
+            >
+              🎸 Aprender
+            </button>
+          )}
+          <button
+            onClick={() => onAlternarAtendido(p)}
+            className="px-4 py-2 rounded-xl border border-noir-700 text-sm text-cream-muted hover:text-gold-300 hover:border-gold-600 transition"
+          >
+            {p.atendido ? "Reabrir" : "✓ Atendido"}
+          </button>
+          <button
+            onClick={() => onExcluir(p)}
+            className="px-4 py-2 rounded-xl border border-noir-700 text-sm text-cream-muted hover:text-red-400 hover:border-red-900 transition"
+          >
+            Excluir
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

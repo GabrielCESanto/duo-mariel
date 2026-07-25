@@ -5,10 +5,13 @@ export default function PedidoModal({ pedido, onFechar }) {
   const [mensagem, setMensagem] = useState("");
   const [status, setStatus] = useState("");
   const [enviando, setEnviando] = useState(false);
+  const [enviado, setEnviado] = useState(false);
 
   if (!pedido) return null;
 
   const enviar = async () => {
+    if (enviando || enviado) return; // evita clique duplo mandar o pedido 2x
+
     if (!supabaseConfigured) {
       setStatus("⚠️ Pedidos ainda não configurados. Fale conosco pelo WhatsApp!");
       return;
@@ -34,6 +37,7 @@ export default function PedidoModal({ pedido, onFechar }) {
       if (!resp.ok) throw new Error(await resp.text());
 
       setStatus("✅ Pedido enviado!");
+      setEnviado(true);
       setTimeout(onFechar, 900);
     } catch (e) {
       console.error("Erro ao enviar pedido:", e);
@@ -82,11 +86,11 @@ export default function PedidoModal({ pedido, onFechar }) {
             Cancelar
           </button>
           <button
-            className="btn-gold px-5 py-2 rounded-xl text-sm"
+            className="btn-gold px-5 py-2 rounded-xl text-sm disabled:opacity-60"
             onClick={enviar}
-            disabled={enviando}
+            disabled={enviando || enviado}
           >
-            Enviar pedido
+            {enviado ? "Enviado ✓" : "Enviar pedido"}
           </button>
         </div>
       </div>

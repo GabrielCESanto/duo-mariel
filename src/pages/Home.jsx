@@ -26,10 +26,15 @@ export default function Home() {
   const [previewId, setPreviewId] = useState(null); // música tocando
   const [previewBuscandoId, setPreviewBuscandoId] = useState(null);
   const [semPreview, setSemPreview] = useState(() => new Set());
+  // Descarta respostas de buscas antigas quando o visitante toca em outra
+  // música antes da anterior responder (evita tocar o preview errado)
+  const pedidoPreviewRef = useRef(0);
 
   const pararPreview = () => {
+    pedidoPreviewRef.current++;
     audioRef.current?.pause();
     setPreviewId(null);
+    setPreviewBuscandoId(null);
   };
 
   useEffect(() => pararPreview, []); // para o áudio ao sair da página
@@ -39,6 +44,8 @@ export default function Home() {
       pararPreview();
       return;
     }
+
+    const meuPedido = ++pedidoPreviewRef.current;
 
     // iOS: o elemento de áudio precisa ser criado e "desbloqueado" com um
     // play() síncrono DENTRO do toque — depois do await o gesto não vale mais
@@ -55,6 +62,8 @@ export default function Home() {
     setPreviewBuscandoId(m.id);
 
     const url = await buscarPreview(m.nome, m.artista);
+    if (pedidoPreviewRef.current !== meuPedido) return; // uma busca mais nova já assumiu
+
     setPreviewBuscandoId(null);
 
     if (!url) {
