@@ -51,11 +51,18 @@ Deno.serve(async (req) => {
             `https://${codigo}.goatcounter.com/api/v0/stats/total?start=${p.inicio}`,
             { headers: { Authorization: `Bearer ${token}` } }
           );
-          if (!resp.ok) return { rotulo: p.rotulo, unicos: null };
+          if (!resp.ok) {
+            // Devolve o motivo (ex.: token sem permissão, código errado)
+            // em vez de só sumir com o número — isso é o que aparece na
+            // aba Network do navegador pra diagnosticar
+            const texto = await resp.text();
+            console.error(`GoatCounter respondeu ${resp.status}:`, texto);
+            return { rotulo: p.rotulo, unicos: null, erro: `${resp.status}: ${texto.slice(0, 200)}` };
+          }
           const dados = await resp.json();
           return { rotulo: p.rotulo, unicos: dados.total_unique ?? null };
-        } catch {
-          return { rotulo: p.rotulo, unicos: null };
+        } catch (e) {
+          return { rotulo: p.rotulo, unicos: null, erro: (e as Error).message };
         }
       })
     );

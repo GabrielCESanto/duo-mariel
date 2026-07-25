@@ -2557,10 +2557,10 @@ function AbaAcessos() {
       return;
     }
     setDados(
-      porPeriodo.map((r) => ({
-        ...r,
-        unicos: unicos?.find((u) => u.rotulo === r.rotulo)?.unicos ?? null,
-      }))
+      porPeriodo.map((r) => {
+        const encontrado = unicos?.find((u) => u.rotulo === r.rotulo);
+        return { ...r, unicos: encontrado?.unicos ?? null, erroUnicos: encontrado?.erro ?? null };
+      })
     );
   };
 
@@ -2622,10 +2622,18 @@ function AbaAcessos() {
               <p className="text-cream-muted/60 text-[11px] mt-2">
                 área do músico: {d.admin ?? "—"}
               </p>
-              <p className="text-gold-300/90 text-xs mt-2 pt-2 border-t border-noir-800">
+              <p
+                className="text-gold-300/90 text-xs mt-2 pt-2 border-t border-noir-800"
+                title={d.erroUnicos || undefined}
+              >
                 📱 {d.unicos ?? "—"} aparelho{d.unicos === 1 ? "" : "s"} diferente
                 {d.unicos === 1 ? "" : "s"}
               </p>
+              {d.erroUnicos && (
+                <p className="text-red-400/80 text-[10px] mt-1 break-words">
+                  {d.erroUnicos}
+                </p>
+              )}
             </div>
           ))}
         </div>
