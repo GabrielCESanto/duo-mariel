@@ -163,11 +163,24 @@ function Login() {
   );
 }
 
+// Abas agrupadas no menu "Outros" — tudo que não é Cifras/Pedidos
+const ABAS_OUTROS = [
+  ["musicas", "Músicas"],
+  ["aprender", "Aprender"],
+  ["agenda", "Agenda"],
+  ["afinador", "Afinador"],
+  ["videos", "Vídeos"],
+];
+
 function Painel() {
   const [searchParams] = useSearchParams();
   const [aba, setAba] = useState(searchParams.get("aba") || "musicas");
   const [pendentes, setPendentes] = useState(0);
   const [pedidoNovo, setPedidoNovo] = useState(null);
+  const [menuOutrosAberto, setMenuOutrosAberto] = useState(false);
+
+  const abasOutros = GOATCOUNTER_CODE ? [...ABAS_OUTROS, ["acessos", "Acessos"]] : ABAS_OUTROS;
+  const estaEmOutros = abasOutros.some(([valor]) => valor === aba);
 
   const contarPendentes = async () => {
     const { count, error } = await supabase
@@ -225,24 +238,9 @@ function Painel() {
         />
       )}
 
-      <div className="flex flex-wrap gap-2 mb-6">
-        <AbaBotao ativa={aba === "musicas"} onClick={() => setAba("musicas")}>
-          Músicas
-        </AbaBotao>
+      <div className="flex flex-wrap gap-2 mb-6 items-center">
         <AbaBotao ativa={aba === "cifras"} onClick={() => setAba("cifras")}>
           Cifras
-        </AbaBotao>
-        <AbaBotao ativa={aba === "aprender"} onClick={() => setAba("aprender")}>
-          Aprender
-        </AbaBotao>
-        <AbaBotao ativa={aba === "agenda"} onClick={() => setAba("agenda")}>
-          Agenda
-        </AbaBotao>
-        <AbaBotao ativa={aba === "afinador"} onClick={() => setAba("afinador")}>
-          Afinador
-        </AbaBotao>
-        <AbaBotao ativa={aba === "videos"} onClick={() => setAba("videos")}>
-          Vídeos
         </AbaBotao>
         <AbaBotao ativa={aba === "pedidos"} onClick={() => setAba("pedidos")}>
           Pedidos
@@ -252,11 +250,36 @@ function Painel() {
             </span>
           )}
         </AbaBotao>
-        {GOATCOUNTER_CODE && (
-          <AbaBotao ativa={aba === "acessos"} onClick={() => setAba("acessos")}>
-            Acessos
+
+        <div className="relative ml-auto">
+          <AbaBotao ativa={estaEmOutros} onClick={() => setMenuOutrosAberto((v) => !v)}>
+            Outros ▾
           </AbaBotao>
-        )}
+          {menuOutrosAberto && (
+            <>
+              {/* Captura o clique fora do menu pra fechar */}
+              <div className="fixed inset-0 z-10" onClick={() => setMenuOutrosAberto(false)} />
+              <div className="absolute right-0 mt-2 w-48 rounded-xl border border-noir-700 bg-noir-900 shadow-xl z-20 overflow-hidden">
+                {abasOutros.map(([valor, rotulo]) => (
+                  <button
+                    key={valor}
+                    onClick={() => {
+                      setAba(valor);
+                      setMenuOutrosAberto(false);
+                    }}
+                    className={`w-full text-left px-4 py-2.5 text-sm transition ${
+                      aba === valor
+                        ? "text-gold-300 bg-noir-800"
+                        : "text-cream-muted hover:bg-noir-800 hover:text-cream"
+                    }`}
+                  >
+                    {rotulo}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
       </div>
 
       {aba === "musicas" && <GerenciarMusicas />}
@@ -324,7 +347,7 @@ function AbaBotao({ ativa, onClick, children }) {
   return (
     <button
       onClick={onClick}
-      className={`px-5 py-2 rounded-xl text-sm tracking-wide transition border ${
+      className={`px-[26px] py-2.5 rounded-xl text-lg tracking-wide transition border ${
         ativa
           ? "btn-gold border-transparent"
           : "border-noir-700 text-cream-muted hover:text-cream hover:border-noir-600"
