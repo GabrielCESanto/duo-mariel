@@ -68,10 +68,22 @@ export default function Cifra() {
   const renderTasksRef = useRef([]);
   const pinchRef = useRef(null); // { distancia, zoomBase, dedos } enquanto os dedos estão na tela
   const pinchOcorreuRef = useRef(false); // evita alternar play/pause ao soltar o pinça
+  const montadoRef = useRef(true); // false assim que a tela é desmontada (ex.: botão Voltar)
 
   rodandoRef.current = rodando;
   renderizandoRef.current = renderizando;
   velocidadeRef.current = velocidade;
+
+  // --- Interrompe a renderização de verdade ao sair da tela ---
+  // Sem isso, apertar "Voltar" no meio do carregamento não parava o
+  // trabalho: ele continuava rodando em segundo plano até terminar ou dar
+  // erro, gastando CPU/GPU do aparelho à toa — e, se o usuário abrisse
+  // outra cifra rápido, competindo por recursos com a nova renderização.
+  useEffect(() => {
+    return () => {
+      montadoRef.current = false;
+    };
+  }, []);
 
   // --- Sessão (área restrita) ---
   useEffect(() => {
@@ -105,7 +117,7 @@ export default function Cifra() {
       let algumaPaginaLimitada = false;
 
       for (let i = 1; i <= doc.numPages; i++) {
-        if (renderIdRef.current !== meuRender) return;
+        if (renderIdRef.current !== meuRender || !montadoRef.current) return;
 
         const pagina = await doc.getPage(i);
         const base = pagina.getViewport({ scale: 1 });
@@ -147,7 +159,7 @@ export default function Cifra() {
           ),
         ]);
 
-        if (renderIdRef.current !== meuRender) return;
+        if (renderIdRef.current !== meuRender || !montadoRef.current) return;
 
         // Converte pra imagem e descarta o canvas — imagem é bem mais leve
         // e resistente na GPU de celular que canvas ao vivo
@@ -160,7 +172,7 @@ export default function Cifra() {
         canvas.width = 0;
         canvas.height = 0;
 
-        if (renderIdRef.current !== meuRender) return;
+        if (renderIdRef.current !== meuRender || !montadoRef.current) return;
         if (!blob) throw new Error("Falha ao converter página em imagem");
 
         const img = document.createElement("img");
@@ -170,14 +182,14 @@ export default function Cifra() {
         img.height = base.height;
         img.className = "w-full block mb-2 rounded-lg";
 
-        if (renderIdRef.current !== meuRender) {
+        if (renderIdRef.current !== meuRender || !montadoRef.current) {
           URL.revokeObjectURL(img.src);
           return;
         }
         container.appendChild(img);
       }
 
-      if (renderIdRef.current === meuRender) {
+      if (renderIdRef.current === meuRender && montadoRef.current) {
         setResolucaoLimitada(algumaPaginaLimitada);
         setRenderizando(false);
       }
