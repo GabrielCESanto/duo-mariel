@@ -201,13 +201,119 @@ function Login() {
 }
 
 // Abas agrupadas no "Menu" — tudo que não é Cifras/Pedidos
+// (o valor de cada uma também é a chave do ícone em <Icone nome={valor} />)
 const ABAS_OUTROS = [
-  ["afinador", "Afinador", "🎸"],
-  ["agenda", "Agenda", "📅"],
-  ["aprender", "Aprender", "🎧"],
-  ["musicas", "Músicas", "🎵"],
-  ["videos", "Vídeos", "🎬"],
+  ["afinador", "Afinador"],
+  ["agenda", "Agenda"],
+  ["aprender", "Aprender"],
+  ["musicas", "Músicas"],
+  ["videos", "Vídeos"],
 ];
+
+// Ícones em traço fino (respeitam a cor do site via currentColor) — emojis
+// coloridos não servem aqui porque a fonte de emoji ignora CSS de cor
+function Icone({ nome, className = "w-5 h-5" }) {
+  const props = {
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.8,
+    strokeLinecap: "round",
+    strokeLinejoin: "round",
+    className,
+  };
+  switch (nome) {
+    case "cifras":
+      return (
+        <svg {...props}>
+          <path d="M6 3h9l3 3v15H6z" />
+          <path d="M15 3v3h3" />
+          <line x1="9" y1="11" x2="15" y2="11" />
+          <line x1="9" y1="14" x2="15" y2="14" />
+          <line x1="9" y1="17" x2="13" y2="17" />
+        </svg>
+      );
+    case "pedidos":
+      return (
+        <svg {...props}>
+          <path d="M4 5h16v10H9l-5 4z" />
+        </svg>
+      );
+    case "menu":
+      return (
+        <svg {...props}>
+          <line x1="4" y1="7" x2="20" y2="7" />
+          <line x1="4" y1="12" x2="20" y2="12" />
+          <line x1="4" y1="17" x2="20" y2="17" />
+        </svg>
+      );
+    case "afinador":
+      return (
+        <svg {...props}>
+          <line x1="6" y1="4" x2="6" y2="20" />
+          <circle cx="6" cy="9" r="2" />
+          <line x1="12" y1="4" x2="12" y2="20" />
+          <circle cx="12" cy="15" r="2" />
+          <line x1="18" y1="4" x2="18" y2="20" />
+          <circle cx="18" cy="7" r="2" />
+        </svg>
+      );
+    case "agenda":
+      return (
+        <svg {...props}>
+          <rect x="4" y="5" width="16" height="15" rx="2" />
+          <line x1="4" y1="10" x2="20" y2="10" />
+          <line x1="8" y1="3" x2="8" y2="7" />
+          <line x1="16" y1="3" x2="16" y2="7" />
+        </svg>
+      );
+    case "aprender":
+      return (
+        <svg {...props}>
+          <path d="M12 6c-2-1.5-5-2-8-1v13c3-1 6-0.5 8 1 2-1.5 5-2 8-1V5c-3-1-6-0.5-8 1z" />
+          <line x1="12" y1="6" x2="12" y2="19" />
+        </svg>
+      );
+    case "musicas":
+      return (
+        <svg {...props}>
+          <circle cx="7" cy="17" r="2.3" />
+          <circle cx="16" cy="15" r="2.3" />
+          <line x1="9.3" y1="17" x2="9.3" y2="5" />
+          <line x1="18.3" y1="15" x2="18.3" y2="7" />
+          <line x1="9.3" y1="5" x2="18.3" y2="7" />
+        </svg>
+      );
+    case "videos":
+      return (
+        <svg {...props}>
+          <rect x="3" y="5" width="18" height="14" rx="2" />
+          <path d="M10 9l6 3-6 3z" fill="currentColor" stroke="none" />
+        </svg>
+      );
+    case "acessos":
+      return (
+        <svg {...props}>
+          <line x1="5" y1="20" x2="5" y2="10" />
+          <line x1="12" y1="20" x2="12" y2="5" />
+          <line x1="19" y1="20" x2="19" y2="13" />
+          <line x1="3" y1="20" x2="21" y2="20" />
+        </svg>
+      );
+    case "mudar":
+      return (
+        <svg {...props}>
+          <path d="M4 6h4l9 12h3" />
+          <path d="M4 18h4l3-4" />
+          <path d="M14 8l3-2" />
+          <path d="M17 6v3h-3" />
+          <path d="M17 18v-3h-3" />
+        </svg>
+      );
+    default:
+      return null;
+  }
+}
 
 function Painel() {
   const [searchParams] = useSearchParams();
@@ -235,7 +341,7 @@ function Painel() {
 
   // "Músicas" sempre em primeiro; o resto, alfabético
   const abasOutros = (
-    GOATCOUNTER_CODE ? [...ABAS_OUTROS, ["acessos", "Acessos", "📊"]] : ABAS_OUTROS
+    GOATCOUNTER_CODE ? [...ABAS_OUTROS, ["acessos", "Acessos"]] : ABAS_OUTROS
   )
     .slice()
     .sort((a, b) => a[1].localeCompare(b[1], "pt-BR"))
@@ -305,10 +411,16 @@ function Painel() {
 
       <div className="flex flex-wrap gap-2 mb-6 items-center">
         <AbaBotao ativa={aba === "cifras"} onClick={() => setAba("cifras")}>
-          🎼 Cifras
+          <span className="inline-flex items-center gap-2">
+            <Icone nome="cifras" className="w-5 h-5 text-gold-400" />
+            Cifras
+          </span>
         </AbaBotao>
         <AbaBotao ativa={aba === "pedidos"} onClick={() => setAba("pedidos")}>
-          🎶 Pedidos
+          <span className="inline-flex items-center gap-2">
+            <Icone nome="pedidos" className="w-5 h-5 text-gold-400" />
+            Pedidos
+          </span>
           {pendentes > 0 && (
             <span className="ml-2 inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full bg-gold-500 text-noir-900 text-[11px] font-semibold align-middle">
               {pendentes}
@@ -322,21 +434,24 @@ function Painel() {
             onClick={() => setMenuOutrosAberto((v) => !v)}
             className="px-8 py-3 text-xl"
           >
-            <span className="text-gold-400">☰</span> Menu ▾
+            <span className="inline-flex items-center gap-2">
+              <Icone nome="menu" className="w-6 h-6 text-gold-400" />
+              Menu ▾
+            </span>
           </AbaBotao>
           {menuOutrosAberto && (
             <>
               {/* Captura o clique fora do menu pra fechar */}
               <div className="fixed inset-0 z-10" onClick={() => setMenuOutrosAberto(false)} />
               <div className="absolute right-0 mt-2 w-48 rounded-xl border border-noir-700 bg-noir-900 shadow-xl z-20 overflow-hidden">
-                {abasOutros.map(([valor, rotulo, icone]) => (
+                {abasOutros.map(([valor, rotulo]) => (
                   <button
                     key={valor}
                     onClick={() => {
                       setAba(valor);
                       setMenuOutrosAberto(false);
                     }}
-                    className={`w-full text-left px-4 py-2.5 text-sm transition ${
+                    className={`w-full text-left px-4 py-2.5 text-sm transition flex items-center gap-2.5 ${
                       valor === "musicas" ? "font-semibold" : ""
                     } ${
                       aba === valor
@@ -344,7 +459,8 @@ function Painel() {
                         : "text-cream-muted hover:bg-noir-800 hover:text-cream"
                     }`}
                   >
-                    {icone} {rotulo}
+                    <Icone nome={valor} className="w-4 h-4 text-gold-400 shrink-0" />
+                    {rotulo}
                   </button>
                 ))}
               </div>
@@ -1049,7 +1165,7 @@ function AbaCifras() {
   }, []);
 
   useEffect(() => {
-    if (musicas.length > 0) setAleatorias(sortearItens(musicas, 5));
+    if (musicas.length > 0) setAleatorias(sortearItens(musicas, 3));
   }, [musicas]);
 
   // Acompanha o download mesmo que ele tenha começado antes desta aba
@@ -1224,13 +1340,14 @@ function AbaCifras() {
         <div className="mt-5 pt-4 border-t border-noir-800">
           <div className="flex items-center justify-between mb-2">
             <h3 className="text-xs uppercase tracking-wider text-cream-muted">
-              5 cifras aleatórias
+              3 cifras aleatórias
             </h3>
             <button
-              onClick={() => setAleatorias(sortearItens(musicas, 5))}
-              className="text-xs text-cream-muted hover:text-gold-300 transition"
+              onClick={() => setAleatorias(sortearItens(musicas, 3))}
+              className="inline-flex items-center gap-1.5 text-2xl text-cream-muted hover:text-gold-300 transition"
             >
-              🔀 Mudar
+              <Icone nome="mudar" className="w-6 h-6 text-gold-400" />
+              Mudar
             </button>
           </div>
           <ul className="divide-y divide-noir-800">
