@@ -227,17 +227,33 @@ export default function Cifra() {
 
   // --- Exibe as imagens das páginas já prontas (geradas no upload) — nada
   // de PDF.js aqui, é só apontar os <img> pras imagens já hospedadas ---
-  const mostrarImagensProntas = (m) => {
+  const mostrarImagensProntas = (m, aoFalhar) => {
     const container = paginasRef.current;
     if (!container) return;
     limparPaginas(container);
     const prefixo = m.cifra_path.replace(/\.pdf$/, "");
+    let jaFalhou = false;
+
     for (let i = 1; i <= m.cifra_paginas; i++) {
       const { data: pub } = supabase.storage.from("cifras").getPublicUrl(`${prefixo}-p${i}.jpg`);
       const img = document.createElement("img");
-      img.src = pub.publicUrl;
       img.alt = `Página ${i} da cifra`;
-      img.className = "w-full block mb-2 rounded-lg";
+      // Reserva o espaço da página (proporção de folha) ANTES da imagem
+      // carregar — sem isso, a <img> não tem altura nenhuma até terminar de
+      // baixar (ou falhar), e a tela toda "colapsa", parecendo uma área
+      // preta vazia em vez de mostrar a cifra carregando
+      img.style.aspectRatio = "0.77";
+      img.className = "w-full h-auto block mb-2 rounded-lg bg-noir-900";
+      img.onerror = () => {
+        // Se a imagem pré-gerada não existir/estiver quebrada, cai pro PDF
+        // direto em vez de deixar a tela vazia
+        if (jaFalhou) return;
+        jaFalhou = true;
+        console.warn(`Imagem da página ${i} de "${m.nome}" não carregou — usando o PDF direto.`);
+        limparPaginas(container);
+        aoFalhar?.();
+      };
+      img.src = pub.publicUrl;
       container.appendChild(img);
     }
     setRenderizando(false);
@@ -251,37 +267,11 @@ export default function Cifra() {
     const containerAtual = paginasRef.current;
     setErro("");
 
-    (async () => {
-      const { data: m, error } = await supabase
-        .from("musicas")
-        .select("id, nome, artista, cifra_path, cifra_paginas")
-        .eq("id", id)
-        .single();
-
-      if (cancelado) return;
-      if (error || !m) {
-        setErro("Música não encontrada.");
-        return;
-      }
-      if (!m.cifra_path) {
-        setErro("Essa música ainda não tem cifra. Envie o PDF na aba Músicas.");
-        setMusica(m);
-        return;
-      }
-      setMusica(m);
-
-      if (m.cifra_paginas > 0) {
-        // Cifra já tem as páginas convertidas em imagem (geradas no upload,
-        // na aba Músicas) — abre quase instantâneo, sem processar PDF
-        // nenhum neste aparelho
-        mostrarImagensProntas(m);
-        return;
-      }
-
-      const { data: pub } = supabase.storage
-        .from("cifras")
-        .getPublicUrl(m.cifra_path);
-
+    // Baixa e renderiza o PDF direto — usado tanto pra cifras antigas (sem
+    // imagens pré-geradas) quanto como reserva, se as imagens prontas de
+    // uma cifra nova estiverem quebradas por algum motivo
+    const carregarViaPdf = async (m) => {
+      const { data: pub } = supabase.storage.from("cifras").getPublicUrl(m.cifra_path);
       try {
         // Sem timeout, uma internet ruim (comum fora de casa) deixava
         // "Carregando cifra..." parado pra sempre, sem indicar se travou
@@ -313,6 +303,39 @@ export default function Cifra() {
           setErro("Não foi possível abrir o PDF. Tente de novo.");
         }
       }
+    };
+
+    (async () => {
+      const { data: m, error } = await supabase
+        .from("musicas")
+        .select("id, nome, artista, cifra_path, cifra_paginas")
+        .eq("id", id)
+        .single();
+
+      if (cancelado) return;
+      if (error || !m) {
+        setErro("Música não encontrada.");
+        return;
+      }
+      if (!m.cifra_path) {
+        setErro("Essa música ainda não tem cifra. Envie o PDF na aba Músicas.");
+        setMusica(m);
+        return;
+      }
+      setMusica(m);
+
+      if (m.cifra_paginas > 0) {
+        // Cifra já tem as páginas convertidas em imagem (geradas no upload,
+        // na aba Músicas) — abre quase instantâneo, sem processar PDF
+        // nenhum neste aparelho. Se alguma imagem estiver quebrada, cai
+        // pro PDF direto em vez de deixar a tela vazia.
+        mostrarImagensProntas(m, () => {
+          if (!cancelado) carregarViaPdf(m);
+        });
+        return;
+      }
+
+      await carregarViaPdf(m);
     })();
 
     return () => {
