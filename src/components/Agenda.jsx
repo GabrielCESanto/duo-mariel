@@ -70,7 +70,7 @@ export default function Agenda() {
         .lt("data", hoje)
         .order("data", { ascending: false })
         .order("hora", { ascending: false })
-        .limit(8),
+        .limit(5),
     ]).then(([{ data: prox, error: e1 }, { data: real, error: e2 }]) => {
       if (!e1) setProximos(prox ?? []);
       if (!e2) setRealizados(real ?? []);
@@ -122,7 +122,7 @@ export default function Agenda() {
         </p>
       ) : (
         <ul className="divide-y divide-noir-800">
-          {eventos.slice(0, 8).map((ev) => {
+          {eventos.slice(0, verRealizados ? 5 : 8).map((ev) => {
             const d = dataLocal(ev.data);
             return (
               <li key={ev.id} className="py-3 flex items-center gap-4">
