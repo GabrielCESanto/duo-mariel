@@ -231,19 +231,32 @@ export default function Cifra() {
     const container = paginasRef.current;
     if (!container) return;
     limparPaginas(container);
-    const prefixo = m.cifra_path.replace(/\.pdf$/, "");
     let jaFalhou = false;
 
     for (let i = 1; i <= m.cifra_paginas; i++) {
-      const { data: pub } = supabase.storage.from("cifras").getPublicUrl(`${prefixo}-p${i}.jpg`);
+      const { data: pub } = supabase.storage
+        .from("cifras")
+        .getPublicUrl(`${m.id}-imgs${m.cifra_versao}-p${i}.jpg`);
       const img = document.createElement("img");
       img.alt = `Página ${i} da cifra`;
-      // Reserva o espaço da página (proporção de folha) ANTES da imagem
+      // Reserva o espaço da página (chute de proporção) ANTES da imagem
       // carregar — sem isso, a <img> não tem altura nenhuma até terminar de
       // baixar (ou falhar), e a tela toda "colapsa", parecendo uma área
-      // preta vazia em vez de mostrar a cifra carregando
+      // preta vazia. object-contain garante que, se essa proporção-chute
+      // não bater com a da página de verdade, a imagem só fica com uma
+      // borda vazia (letterbox) em vez de ser esticada/achatada — sem isso
+      // o texto saía distorcido sempre que a página não era 0.77 de
+      // proporção.
       img.style.aspectRatio = "0.77";
-      img.className = "w-full h-auto block mb-2 rounded-lg bg-noir-900";
+      img.className = "w-full h-auto block mb-2 rounded-lg bg-noir-900 object-contain";
+      img.onload = () => {
+        // Ajusta pra proporção real da imagem assim que ela carrega, pra
+        // não sobrar espaço vazio (o object-contain acima já garantia que
+        // nunca distorcia, isso só deixa o encaixe exato)
+        if (img.naturalWidth && img.naturalHeight) {
+          img.style.aspectRatio = `${img.naturalWidth} / ${img.naturalHeight}`;
+        }
+      };
       img.onerror = () => {
         // Se a imagem pré-gerada não existir/estiver quebrada, cai pro PDF
         // direto em vez de deixar a tela vazia
@@ -308,7 +321,7 @@ export default function Cifra() {
     (async () => {
       const { data: m, error } = await supabase
         .from("musicas")
-        .select("id, nome, artista, cifra_path, cifra_paginas")
+        .select("id, nome, artista, cifra_path, cifra_paginas, cifra_versao")
         .eq("id", id)
         .single();
 

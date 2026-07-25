@@ -30,6 +30,13 @@ const subirImagemPagina = async (path, blob) => {
   return resultado;
 };
 
+// Caminho da imagem de uma página, com "versão" embutida no nome. Sem essa
+// versão, reprocessar uma cifra reaproveitaria o mesmo nome de arquivo de
+// antes — e o cache CacheFirst do navegador continuaria servindo pra
+// sempre a resposta antiga (ou corrompida, de uma tentativa que falhou no
+// meio), mesmo depois do arquivo certo já estar no Storage.
+const caminhoImagemPagina = (musicaId, versao, pagina) => `${musicaId}-imgs${versao}-p${pagina}.jpg`;
+
 // Compara nomes de músicas ignorando acentos, caixa e pontuação
 const normalizarNome = (s) =>
   String(s ?? "")
@@ -517,10 +524,13 @@ function GerenciarMusicas() {
   // Lista todos os arquivos de uma cifra no Storage: o PDF original e as
   // imagens pré-renderizadas de cada página (se existirem)
   const arquivosDaCifra = (m) => {
-    if (!m.cifra_path) return [];
-    const prefixo = m.cifra_path.replace(/\.pdf$/, "");
-    const arquivos = [m.cifra_path];
-    for (let i = 1; i <= (m.cifra_paginas || 0); i++) arquivos.push(`${prefixo}-p${i}.jpg`);
+    const arquivos = [];
+    if (m.cifra_path) arquivos.push(m.cifra_path);
+    if (m.cifra_versao) {
+      for (let i = 1; i <= (m.cifra_paginas || 0); i++) {
+        arquivos.push(caminhoImagemPagina(m.id, m.cifra_versao, i));
+      }
+    }
     return arquivos;
   };
 
@@ -569,6 +579,7 @@ function GerenciarMusicas() {
     // fracos, arriscado). Se isso falhar, a cifra ainda funciona — Cifra.jsx
     // cai pro PDF direto, só sem a abertura rápida.
     let totalPaginas = 0;
+    let versao = null;
     try {
       // Import dinâmico: pdf.js é pesado, só baixa quando alguém realmente
       // for enviar/reprocessar uma cifra, não pra qualquer visitante do site
@@ -576,13 +587,18 @@ function GerenciarMusicas() {
       const imagens = await pdfParaImagensJpeg(arquivo, (atual, total) => {
         setStatus(`⏳ Preparando página ${atual}/${total}...`);
       });
+      versao = Date.now();
       for (let i = 0; i < imagens.length; i++) {
-        const { error: imgError } = await subirImagemPagina(`${prefixo}-p${i + 1}.jpg`, imagens[i]);
+        const { error: imgError } = await subirImagemPagina(
+          caminhoImagemPagina(m.id, versao, i + 1),
+          imagens[i]
+        );
         if (imgError) throw imgError;
       }
       totalPaginas = imagens.length;
     } catch (e) {
       console.error("Falha ao gerar imagens das páginas da cifra:", e);
+      versao = null;
     }
 
     const arquivosAntigos = arquivosDaCifra(m);
@@ -591,7 +607,11 @@ function GerenciarMusicas() {
     }
     const { error: dbError } = await supabase
       .from("musicas")
-      .update({ cifra_path: path, cifra_paginas: totalPaginas || null })
+      .update({
+        cifra_path: path,
+        cifra_paginas: totalPaginas || null,
+        cifra_versao: versao,
+      })
       .eq("id", m.id);
 
     if (dbError) {
@@ -961,7 +981,7 @@ function AbaCifras() {
   const carregar = () =>
     supabase
       .from("musicas")
-      .select("id, nome, artista, estilo, cifra_path, cifra_paginas")
+      .select("id, nome, artista, estilo, cifra_path, cifra_paginas, cifra_versao")
       .not("cifra_path", "is", null)
       .order("nome")
       .order("artista")
@@ -996,7 +1016,7 @@ function AbaCifras() {
   // Cifras enviadas antes dessa funcionalidade só têm o PDF — abrem devagar
   // porque o celular precisa renderizar o PDF na hora. Esse botão gera as
   // imagens pra elas também, sem precisar reenviar o PDF de novo.
-  const semImagens = musicas.filter((m) => !m.cifra_paginas);
+  const semImagens = musicas.filter((m) => !m.cifra_paginas || !m.cifra_versao);
 
   const reprocessarCifrasAntigas = async () => {
     if (semImagens.length === 0 || reprocessando) return;
@@ -1008,14 +1028,20 @@ function AbaCifras() {
         // isso reconecta se estiver perto de expirar, evitando falhas de
         // RLS no meio do reprocessamento
         await supabase.auth.getSession();
-        const prefixo = m.cifra_path.replace(/\.pdf$/, "");
         const { data: pub } = supabase.storage.from("cifras").getPublicUrl(m.cifra_path);
         const imagens = await pdfParaImagensJpeg(pub.publicUrl);
+        const versao = Date.now();
         for (let p = 0; p < imagens.length; p++) {
-          const { error } = await subirImagemPagina(`${prefixo}-p${p + 1}.jpg`, imagens[p]);
+          const { error } = await subirImagemPagina(
+            caminhoImagemPagina(m.id, versao, p + 1),
+            imagens[p]
+          );
           if (error) throw error;
         }
-        await supabase.from("musicas").update({ cifra_paginas: imagens.length }).eq("id", m.id);
+        await supabase
+          .from("musicas")
+          .update({ cifra_paginas: imagens.length, cifra_versao: versao })
+          .eq("id", m.id);
       } catch (e) {
         console.error(`Falha ao reprocessar "${m.nome}":`, e);
       }
