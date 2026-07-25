@@ -563,7 +563,7 @@ export default function Cifra() {
                 <button
                   onClick={() => setRodando((r) => !r)}
                   aria-label={rodando ? "Pausar" : "Rolar"}
-                  className="btn-gold w-14 h-14 md:w-20 md:h-20 rounded-2xl text-2xl md:text-4xl"
+                  className="btn-gold w-16 h-16 md:w-28 md:h-28 rounded-2xl text-3xl md:text-5xl"
                 >
                   {rodando ? "❚❚" : "▶"}
                 </button>
