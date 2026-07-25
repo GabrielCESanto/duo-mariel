@@ -11,17 +11,27 @@ const VELOCIDADE_MAX = 120;
 const VELOCIDADE_PASSO = 5;
 const ZOOM_MIN = 0.6;
 const ZOOM_MAX = 2.5;
+const TIMEOUT_CARREGAMENTO_MS = 15_000;
 
 const distanciaEntreToques = (touches) => {
   const [a, b] = touches;
   return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
 };
 
+// "dvh" (altura real da viewport, ajustada à barra de endereço dinâmica do
+// celular) não existe em navegadores/webviews mais antigos — nesses casos
+// cai pro "vh" tradicional em vez de ficar sem altura nenhuma. Decidido via
+// feature-detection (não dá pra confiar na ordem das classes do Tailwind
+// no CSS gerado pra fazer esse fallback via cascata).
+const ALTURA_TELA_CLASSE =
+  typeof CSS !== "undefined" && CSS.supports?.("height", "100dvh") ? "h-dvh" : "h-screen";
+
 export default function Cifra() {
   const { id } = useParams();
   const [sessao, setSessao] = useState(undefined); // undefined = verificando
   const [musica, setMusica] = useState(null);
   const [erro, setErro] = useState("");
+  const [tentativa, setTentativa] = useState(0); // botão "Tentar de novo" incrementa isso
   const [rodando, setRodando] = useState(false);
   const [velocidade, setVelocidade] = useState(20);
   // "zoom" é o valor com que as páginas foram DE FATO renderizadas (caro:
@@ -72,6 +82,8 @@ export default function Cifra() {
   useEffect(() => {
     if (!sessao) return;
     let cancelado = false;
+    let timeoutId;
+    setErro("");
 
     (async () => {
       const { data: m, error } = await supabase
@@ -97,25 +109,48 @@ export default function Cifra() {
         .getPublicUrl(m.cifra_path);
 
       try {
-        const doc = await pdfjs.getDocument(pub.publicUrl).promise;
+        // Sem timeout, uma internet ruim (comum fora de casa) deixava
+        // "Carregando cifra..." parado pra sempre, sem indicar se travou
+        // ou só está lento — e sem jeito de tentar de novo
+        const doc = await Promise.race([
+          pdfjs.getDocument(pub.publicUrl).promise,
+          new Promise((_, rejeitar) => {
+            timeoutId = setTimeout(
+              () => rejeitar(new Error("TIMEOUT_CARREGAMENTO")),
+              TIMEOUT_CARREGAMENTO_MS
+            );
+          }),
+        ]);
+        clearTimeout(timeoutId);
         if (cancelado) return;
         docRef.current = doc;
         await renderizar(doc, zoomRef.current);
       } catch (e) {
+        clearTimeout(timeoutId);
         console.error(e);
-        if (!cancelado) setErro("Não foi possível abrir o PDF.");
+        if (cancelado) return;
+        if (e?.message === "TIMEOUT_CARREGAMENTO") {
+          setErro("Demorou demais pra carregar. Verifique sua internet e tente de novo.");
+        } else if (!navigator.onLine) {
+          setErro(
+            "Sem internet, e essa cifra ainda não está salva neste aparelho. Conecte-se e tente de novo."
+          );
+        } else {
+          setErro("Não foi possível abrir o PDF. Tente de novo.");
+        }
       }
     })();
 
     return () => {
       cancelado = true;
+      clearTimeout(timeoutId);
       docRef.current?.destroy?.();
       // Sem isso, um efeito de zoom que dispare logo depois da troca de
       // música ainda vê o doc antigo (já destruído) e chama getPage nele,
       // travando "Carregando cifra..." pra sempre na música nova
       docRef.current = null;
     };
-  }, [sessao, id]);
+  }, [sessao, id, tentativa]);
 
   // --- Renderiza as páginas no zoom atual ---
   const renderIdRef = useRef(0);
@@ -126,41 +161,46 @@ export default function Cifra() {
     const meuRender = ++renderIdRef.current; // cancela renders anteriores
     setRenderizando(true);
 
-    // Guarda em que % da cifra o usuário estava ANTES de reconstruir os
-    // canvases, pra não "teleportar" pra outro trecho da música quando o
-    // zoom mudar (o conteúdo muda de altura total)
-    let proporcaoScroll = 0;
-    if (scrollEl && scrollEl.scrollHeight > scrollEl.clientHeight) {
-      proporcaoScroll = scrollEl.scrollTop / (scrollEl.scrollHeight - scrollEl.clientHeight);
-    }
-
-    // Cancela renders de página do zoom anterior que ainda estejam em
-    // andamento — sem isso, uma RenderingCancelledException não tratada
-    // interrompia a função antes do setRenderizando(false), deixando a
-    // tela travada em "Carregando cifra..."
-    renderTasksRef.current.forEach((tarefa) => tarefa.cancel?.());
-    renderTasksRef.current = [];
-
-    // Libera a memória dos canvases antigos antes de descartá-los — muitos
-    // canvases grandes vivos ao mesmo tempo fazem o navegador (sobretudo em
-    // iOS/Safari) "reciclar" algum deles, pintando a página de verde/branco
-    for (const el of container.children) {
-      if (el.tagName === "CANVAS") {
-        el.width = 0;
-        el.height = 0;
+    // Tudo que segue está num único try/catch — inclusive o cancelamento
+    // das tarefas antigas e a limpeza dos canvases, que antes ficavam FORA
+    // da proteção. Qualquer exceção inesperada nessas etapas (não só no
+    // loop de páginas) agora sempre cai aqui, garantindo que a tela nunca
+    // fique presa em "Carregando cifra..." pra sempre.
+    try {
+      // Guarda em que % da cifra o usuário estava ANTES de reconstruir os
+      // canvases, pra não "teleportar" pra outro trecho da música quando o
+      // zoom mudar (o conteúdo muda de altura total)
+      let proporcaoScroll = 0;
+      if (scrollEl && scrollEl.scrollHeight > scrollEl.clientHeight) {
+        proporcaoScroll = scrollEl.scrollTop / (scrollEl.scrollHeight - scrollEl.clientHeight);
       }
-    }
-    container.innerHTML = "";
 
-    const larguraCss =
-      Math.min(container.clientWidth || window.innerWidth, 1000) * escala;
-    const dpr = window.devicePixelRatio || 1;
-    let algumaPaginaLimitada = false;
+      // Cancela renders de página do zoom anterior que ainda estejam em
+      // andamento — sem isso, uma RenderingCancelledException não tratada
+      // interrompia a função antes do setRenderizando(false), deixando a
+      // tela travada em "Carregando cifra..."
+      renderTasksRef.current.forEach((tarefa) => tarefa.cancel?.());
+      renderTasksRef.current = [];
 
-    for (let i = 1; i <= doc.numPages; i++) {
-      if (renderIdRef.current !== meuRender) return;
+      // Libera a memória dos canvases antigos antes de descartá-los — muitos
+      // canvases grandes vivos ao mesmo tempo fazem o navegador (sobretudo em
+      // iOS/Safari) "reciclar" algum deles, pintando a página de verde/branco
+      for (const el of container.children) {
+        if (el.tagName === "CANVAS") {
+          el.width = 0;
+          el.height = 0;
+        }
+      }
+      container.innerHTML = "";
 
-      try {
+      const larguraCss =
+        Math.min(container.clientWidth || window.innerWidth, 1000) * escala;
+      const dpr = window.devicePixelRatio || 1;
+      let algumaPaginaLimitada = false;
+
+      for (let i = 1; i <= doc.numPages; i++) {
+        if (renderIdRef.current !== meuRender) return;
+
         const pagina = await doc.getPage(i);
         const base = pagina.getViewport({ scale: 1 });
         const fator = larguraCss / base.width;
@@ -200,32 +240,31 @@ export default function Cifra() {
         });
         renderTasksRef.current.push(tarefa);
         await tarefa.promise;
-      } catch (e) {
-        // Render cancelado por um zoom mais recente, ou doc destruído por
-        // uma troca de música — não são erros reais pro usuário ver
-        if (e?.name === "RenderingCancelledException" || renderIdRef.current !== meuRender) {
-          return;
-        }
-        console.error(e);
-        setErro("Não foi possível exibir essa página da cifra.");
+      }
+
+      if (renderIdRef.current === meuRender) {
+        alturaNaturalRef.current = container.scrollHeight;
+        setResolucaoLimitada(algumaPaginaLimitada);
         setRenderizando(false);
+
+        // Restaura a posição relativa de leitura no novo tamanho, depois que
+        // o navegador aplicar o layout dos canvases novos
+        if (scrollEl) {
+          requestAnimationFrame(() => {
+            const maxScroll = scrollEl.scrollHeight - scrollEl.clientHeight;
+            if (maxScroll > 0) scrollEl.scrollTop = proporcaoScroll * maxScroll;
+          });
+        }
+      }
+    } catch (e) {
+      // Render cancelado por um zoom mais recente, ou doc destruído por uma
+      // troca de música — não são erros reais pro usuário ver
+      if (e?.name === "RenderingCancelledException" || renderIdRef.current !== meuRender) {
         return;
       }
-    }
-
-    if (renderIdRef.current === meuRender) {
-      alturaNaturalRef.current = container.scrollHeight;
-      setResolucaoLimitada(algumaPaginaLimitada);
+      console.error(e);
+      setErro("Não foi possível exibir essa cifra.");
       setRenderizando(false);
-
-      // Restaura a posição relativa de leitura no novo tamanho, depois que
-      // o navegador aplicar o layout dos canvases novos
-      if (scrollEl) {
-        requestAnimationFrame(() => {
-          const maxScroll = scrollEl.scrollHeight - scrollEl.clientHeight;
-          if (maxScroll > 0) scrollEl.scrollTop = proporcaoScroll * maxScroll;
-        });
-      }
     }
   };
 
@@ -239,7 +278,10 @@ export default function Cifra() {
 
   // --- zoom assentou → agora sim re-renderiza o PDF de verdade ---
   useEffect(() => {
-    if (docRef.current) renderizar(docRef.current, zoom);
+    // .catch() por segurança: renderizar() já trata os próprios erros, mas
+    // sem isso qualquer falha imprevista viraria uma rejeição de promise
+    // não tratada, silenciosa, em vez de aparecer no console
+    if (docRef.current) renderizar(docRef.current, zoom).catch((e) => console.error(e));
   }, [zoom]);
 
   // --- Zoom mudou → ajusta a velocidade proporcionalmente, senão a mesma
@@ -273,7 +315,9 @@ export default function Cifra() {
 
       clearTimeout(timer);
       timer = setTimeout(() => {
-        if (docRef.current) renderizar(docRef.current, zoomRef.current);
+        if (docRef.current) {
+          renderizar(docRef.current, zoomRef.current).catch((e) => console.error(e));
+        }
       }, 300);
     };
     window.addEventListener("resize", aoRedimensionar);
@@ -427,48 +471,90 @@ export default function Cifra() {
   const escalaAoVivo = zoomAlvo / zoom;
 
   return (
-    <div className="h-dvh flex flex-col">
-      {/* Barra superior */}
-      <header className="flex items-center justify-between gap-3 px-4 py-2 border-b border-noir-800 bg-noir-900/90 shrink-0">
-        <Link
-          to="/admin?aba=cifras"
-          className="text-xs text-cream-muted hover:text-gold-300 transition shrink-0"
-        >
-          ‹ Voltar
-        </Link>
-        <div className="min-w-0 text-center">
-          <p className="text-cream text-sm truncate">{musica?.nome}</p>
-          <p className="text-cream-muted text-xs truncate">{musica?.artista}</p>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <button
-            onClick={() => setZoomAlvo((z) => Math.max(ZOOM_MIN, +(z - 0.15).toFixed(2)))}
-            aria-label="Diminuir zoom"
-            className="w-[72px] h-[72px] rounded-lg border border-noir-700 text-cream-muted text-lg hover:text-gold-300 transition"
+    <div className={`${ALTURA_TELA_CLASSE} flex flex-col`}>
+      {/* Barra superior — todos os controles reunidos aqui */}
+      <header className="border-b border-noir-800 bg-noir-900/90 shrink-0 px-3 py-2 space-y-2">
+        <div className="flex items-center gap-2">
+          <Link
+            to="/admin?aba=cifras"
+            className="shrink-0 h-14 px-4 flex items-center rounded-xl border border-noir-700 text-cream-muted text-base font-medium hover:text-gold-300 hover:border-gold-600 transition"
           >
-            A−
-          </button>
-          <div className="text-center leading-tight w-12">
-            <span className="text-cream-muted text-xs tabular-nums">
-              {Math.round(zoomAlvo * 100)}%
-            </span>
-            {resolucaoLimitada && (
-              <p
-                title="Nitidez reduzida neste zoom para não travar em aparelhos mais fracos"
-                className="text-[9px] text-amber-400/80 leading-none mt-0.5"
-              >
-                ◐ nitidez
-              </p>
-            )}
+            ‹ Voltar
+          </Link>
+          <div className="min-w-0 flex-1 text-center px-1">
+            <p className="text-cream text-sm truncate">{musica?.nome}</p>
+            <p className="text-cream-muted text-xs truncate">{musica?.artista}</p>
           </div>
-          <button
-            onClick={() => setZoomAlvo((z) => Math.min(ZOOM_MAX, +(z + 0.15).toFixed(2)))}
-            aria-label="Aumentar zoom"
-            className="w-[72px] h-[72px] rounded-lg border border-noir-700 text-cream-muted text-lg hover:text-gold-300 transition"
-          >
-            A+
-          </button>
         </div>
+
+        {!erro && (
+          <div className="flex items-center justify-center gap-2 flex-wrap">
+            <button
+              onClick={() =>
+                setVelocidade((v) => Math.max(VELOCIDADE_MIN, v - VELOCIDADE_PASSO))
+              }
+              aria-label="Mais devagar"
+              className="w-10 h-10 rounded-lg border border-noir-700 text-cream text-lg hover:border-gold-600 transition shrink-0"
+            >
+              −
+            </button>
+
+            <button
+              onClick={() => setRodando((r) => !r)}
+              aria-label={rodando ? "Pausar" : "Rolar"}
+              className="btn-gold w-14 h-14 rounded-full text-2xl shrink-0"
+            >
+              {rodando ? "❚❚" : "▶"}
+            </button>
+
+            <button
+              onClick={() =>
+                setVelocidade((v) => Math.min(VELOCIDADE_MAX, v + VELOCIDADE_PASSO))
+              }
+              aria-label="Mais rápido"
+              className="w-10 h-10 rounded-lg border border-noir-700 text-cream text-lg hover:border-gold-600 transition shrink-0"
+            >
+              +
+            </button>
+
+            <span className="text-cream-muted text-[10px] leading-tight w-10 text-center shrink-0">
+              {velocidade}
+              <br />
+              px/s
+            </span>
+
+            <div className="flex flex-col gap-1 shrink-0">
+              <button
+                onClick={() => setZoomAlvo((z) => Math.min(ZOOM_MAX, +(z + 0.15).toFixed(2)))}
+                aria-label="Aumentar zoom"
+                className="w-9 h-7 rounded-md border border-noir-700 text-cream-muted text-xs hover:text-gold-300 transition"
+              >
+                A+
+              </button>
+              <button
+                onClick={() => setZoomAlvo((z) => Math.max(ZOOM_MIN, +(z - 0.15).toFixed(2)))}
+                aria-label="Diminuir zoom"
+                className="w-9 h-7 rounded-md border border-noir-700 text-cream-muted text-xs hover:text-gold-300 transition"
+              >
+                A−
+              </button>
+            </div>
+
+            <div className="text-center leading-tight w-9 shrink-0">
+              <span className="text-cream-muted text-[10px] tabular-nums">
+                {Math.round(zoomAlvo * 100)}%
+              </span>
+              {resolucaoLimitada && (
+                <p
+                  title="Nitidez reduzida neste zoom para não travar em aparelhos mais fracos"
+                  className="text-[8px] text-amber-400/80 leading-none mt-0.5"
+                >
+                  ◐
+                </p>
+              )}
+            </div>
+          </div>
+        )}
       </header>
 
       {/* Área do PDF — toque alterna play/pause; pinça com 2 dedos dá zoom */}
@@ -527,7 +613,18 @@ export default function Cifra() {
         style={{ touchAction: "pan-x pan-y" }}
       >
         {erro ? (
-          <p className="text-cream-muted text-center py-16">{erro}</p>
+          <div className="text-center py-16 px-4">
+            <p className="text-cream-muted mb-4">{erro}</p>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setTentativa((t) => t + 1);
+              }}
+              className="btn-gold px-5 py-2.5 rounded-xl text-sm"
+            >
+              🔄 Tentar de novo
+            </button>
+          </div>
         ) : (
           <>
             {renderizando && (
@@ -553,43 +650,6 @@ export default function Cifra() {
           </>
         )}
       </div>
-
-      {/* Controles */}
-      {!erro && (
-        <footer className="flex items-center justify-center gap-6 px-4 py-4 border-t border-noir-800 bg-noir-900/90 shrink-0 flex-wrap">
-          <button
-            onClick={() =>
-              setVelocidade((v) => Math.max(VELOCIDADE_MIN, v - VELOCIDADE_PASSO))
-            }
-            aria-label="Mais devagar"
-            className="w-[99px] h-[99px] rounded-xl border border-noir-700 text-cream text-3xl hover:border-gold-600 transition"
-          >
-            −
-          </button>
-
-          <button
-            onClick={() => setRodando((r) => !r)}
-            aria-label={rodando ? "Pausar" : "Rolar"}
-            className="btn-gold w-36 h-36 rounded-full text-5xl"
-          >
-            {rodando ? "❚❚" : "▶"}
-          </button>
-
-          <button
-            onClick={() =>
-              setVelocidade((v) => Math.min(VELOCIDADE_MAX, v + VELOCIDADE_PASSO))
-            }
-            aria-label="Mais rápido"
-            className="w-[99px] h-[99px] rounded-xl border border-noir-700 text-cream text-3xl hover:border-gold-600 transition"
-          >
-            +
-          </button>
-
-          <span className="text-cream-muted text-xs w-16 text-center">
-            {velocidade} px/s
-          </span>
-        </footer>
-      )}
     </div>
   );
 }

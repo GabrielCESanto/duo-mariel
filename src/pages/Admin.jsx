@@ -863,7 +863,22 @@ function AbaCifras() {
   const [aleatorias, setAleatorias] = useState([]);
   const [progresso, setProgresso] = useState(() => estadoDownloadCifras());
   const [modalAberto, setModalAberto] = useState(false);
+  const [armazenamentoPersistente, setArmazenamentoPersistente] = useState(null); // null = verificando
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!navigator.storage?.persist) {
+      setArmazenamentoPersistente(false);
+      return;
+    }
+    // No iOS/Safari isso quase sempre volta false — o navegador não garante
+    // manter o cache das cifras (pode limpar sozinho depois de ~1 semana
+    // sem uso), diferente do Android/Chrome
+    navigator.storage
+      .persist()
+      .then(setArmazenamentoPersistente)
+      .catch(() => setArmazenamentoPersistente(false));
+  }, []);
 
   const carregar = () =>
     supabase
@@ -913,9 +928,19 @@ function AbaCifras() {
           {progresso.baixando ? `⏳ Baixando ${progresso.feito}/${progresso.total}` : "Baixar"}
         </button>
       </div>
-      <p className="text-xs text-cream-muted mb-3">
-        Dica: abra as cifras do show com internet — elas ficam salvas offline.
-      </p>
+      <div className="mb-3">
+        <p className="text-xs text-cream-muted">
+          Dica: abra as cifras do show com internet — elas ficam salvas offline.
+        </p>
+        {armazenamentoPersistente === false && (
+          <p className="text-xs text-amber-400/80 mt-1">
+            ⚠️ Este navegador (comum no iPhone/Safari) não garante manter esse
+            cache pra sempre — ele pode ser apagado sozinho depois de uns 7
+            dias sem abrir o site. Abra o app com internet regularmente, e
+            sempre antes de um show.
+          </p>
+        )}
+      </div>
 
       {modalAberto && (
         <ModalDownloadCifras progresso={progresso} onFechar={() => setModalAberto(false)} />
