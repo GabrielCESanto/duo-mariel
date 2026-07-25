@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { supabase, supabaseConfigured } from "../lib/supabase";
+import { supabase, supabaseConfigured, ACESSOS_FUNCTION_URL, anonKey } from "../lib/supabase";
 import {
   assinarDownloadCifras,
   baixarCifrasEmCache,
@@ -2495,6 +2495,37 @@ async function contarAcessos(caminho, inicio) {
   }
 }
 
+// Aparelhos únicos por período — via edge function, que consulta a API
+// privada do GoatCounter (o endpoint público de contador só dá pageviews,
+// não diferencia aparelho). Só funciona com o secret GOATCOUNTER_API_TOKEN
+// configurado na function; se não estiver, some da tela em vez de quebrar.
+async function buscarAparelhosUnicos(periodos) {
+  if (!ACESSOS_FUNCTION_URL) return null;
+  try {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session) return null;
+
+    const resp = await fetch(ACESSOS_FUNCTION_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: anonKey,
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({
+        periodos: periodos.map(([rotulo, inicio]) => ({ rotulo, inicio })),
+      }),
+    });
+    if (!resp.ok) return null;
+    const { resultado } = await resp.json();
+    return resultado; // [{ rotulo, unicos }]
+  } catch {
+    return null;
+  }
+}
+
 function AbaAcessos() {
   const [dados, setDados] = useState(null);
   const [erro, setErro] = useState(false);
@@ -2507,22 +2538,30 @@ function AbaAcessos() {
       ["7 dias", dataIso(6)],
       ["30 dias", dataIso(29)],
     ];
-    // As 6 chamadas são independentes — paralelizar deixa o carregamento
+    // As chamadas são independentes — paralelizar deixa o carregamento
     // bem mais rápido do que esperar uma de cada vez
-    const resultado = await Promise.all(
-      periodos.map(async ([rotulo, inicio]) => {
-        const [publico, admin] = await Promise.all([
-          contarAcessos("/", inicio),
-          contarAcessos("/admin", inicio),
-        ]);
-        return { rotulo, publico, admin };
-      })
-    );
-    if (resultado.every((r) => r.publico === null && r.admin === null)) {
+    const [porPeriodo, unicos] = await Promise.all([
+      Promise.all(
+        periodos.map(async ([rotulo, inicio]) => {
+          const [publico, admin] = await Promise.all([
+            contarAcessos("/", inicio),
+            contarAcessos("/admin", inicio),
+          ]);
+          return { rotulo, publico, admin };
+        })
+      ),
+      buscarAparelhosUnicos(periodos),
+    ]);
+    if (porPeriodo.every((r) => r.publico === null && r.admin === null)) {
       setErro(true);
       return;
     }
-    setDados(resultado);
+    setDados(
+      porPeriodo.map((r) => ({
+        ...r,
+        unicos: unicos?.find((u) => u.rotulo === r.rotulo)?.unicos ?? null,
+      }))
+    );
   };
 
   useEffect(() => {
@@ -2583,13 +2622,20 @@ function AbaAcessos() {
               <p className="text-cream-muted/60 text-[11px] mt-2">
                 área do músico: {d.admin ?? "—"}
               </p>
+              <p className="text-gold-300/90 text-xs mt-2 pt-2 border-t border-noir-800">
+                📱 {d.unicos ?? "—"} aparelho{d.unicos === 1 ? "" : "s"} diferente
+                {d.unicos === 1 ? "" : "s"}
+              </p>
             </div>
           ))}
         </div>
       )}
 
       <p className="text-cream-muted/60 text-[11px] mt-4">
-        Visitantes únicos por período, contados pelo GoatCounter (sem cookies).
+        "Visitas ao site"/"área do músico" contam cada carregamento de página
+        (pageviews). "Aparelhos diferentes" é uma estimativa de visitantes
+        únicos feita pelo GoatCounter (sem cookies) — some da lista se a
+        function de aparelhos únicos não estiver configurada.
       </p>
     </div>
   );
