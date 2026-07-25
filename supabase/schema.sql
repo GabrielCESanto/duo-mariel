@@ -186,6 +186,11 @@ create policy "videos: delete autenticado"
 -- Coluna que liga a música ao arquivo de cifra no bucket
 alter table public.musicas add column if not exists cifra_path text;
 
+-- Quantidade de páginas já convertidas em imagem (arquivos "<mesmo-nome-sem
+-- .pdf>-p1.jpg", "-p2.jpg" etc. no mesmo bucket). Null/0 = cifra antiga que
+-- ainda só tem o PDF; nesse caso o app renderiza o PDF na hora, mais devagar.
+alter table public.musicas add column if not exists cifra_paginas integer;
+
 -- Bucket público para leitura (URLs estáveis = funciona offline no PWA);
 -- escrita somente autenticada.
 insert into storage.buckets (id, name, public)

@@ -225,6 +225,24 @@ export default function Cifra() {
     }
   };
 
+  // --- Exibe as imagens das páginas já prontas (geradas no upload) — nada
+  // de PDF.js aqui, é só apontar os <img> pras imagens já hospedadas ---
+  const mostrarImagensProntas = (m) => {
+    const container = paginasRef.current;
+    if (!container) return;
+    limparPaginas(container);
+    const prefixo = m.cifra_path.replace(/\.pdf$/, "");
+    for (let i = 1; i <= m.cifra_paginas; i++) {
+      const { data: pub } = supabase.storage.from("cifras").getPublicUrl(`${prefixo}-p${i}.jpg`);
+      const img = document.createElement("img");
+      img.src = pub.publicUrl;
+      img.alt = `Página ${i} da cifra`;
+      img.className = "w-full block mb-2 rounded-lg";
+      container.appendChild(img);
+    }
+    setRenderizando(false);
+  };
+
   // --- Carrega música + PDF ---
   useEffect(() => {
     if (!sessao) return;
@@ -236,7 +254,7 @@ export default function Cifra() {
     (async () => {
       const { data: m, error } = await supabase
         .from("musicas")
-        .select("id, nome, artista, cifra_path")
+        .select("id, nome, artista, cifra_path, cifra_paginas")
         .eq("id", id)
         .single();
 
@@ -251,6 +269,14 @@ export default function Cifra() {
         return;
       }
       setMusica(m);
+
+      if (m.cifra_paginas > 0) {
+        // Cifra já tem as páginas convertidas em imagem (geradas no upload,
+        // na aba Músicas) — abre quase instantâneo, sem processar PDF
+        // nenhum neste aparelho
+        mostrarImagensProntas(m);
+        return;
+      }
 
       const { data: pub } = supabase.storage
         .from("cifras")

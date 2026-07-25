@@ -472,6 +472,16 @@ function GerenciarMusicas() {
     setForm({ nome: "", artista: "", estilo: "" });
   };
 
+  // Lista todos os arquivos de uma cifra no Storage: o PDF original e as
+  // imagens pré-renderizadas de cada página (se existirem)
+  const arquivosDaCifra = (m) => {
+    if (!m.cifra_path) return [];
+    const prefixo = m.cifra_path.replace(/\.pdf$/, "");
+    const arquivos = [m.cifra_path];
+    for (let i = 1; i <= (m.cifra_paginas || 0); i++) arquivos.push(`${prefixo}-p${i}.jpg`);
+    return arquivos;
+  };
+
   const excluir = async (m) => {
     if (!window.confirm(`Excluir "${m.nome} — ${m.artista}"?${m.cifra_path ? "\nA cifra em PDF também será apagada." : ""}`)) return;
     const { error } = await supabase.from("musicas").delete().eq("id", m.id);
@@ -480,8 +490,9 @@ function GerenciarMusicas() {
       setStatus("❌ Erro ao excluir.");
       return;
     }
-    if (m.cifra_path) {
-      await supabase.storage.from("cifras").remove([m.cifra_path]);
+    const arquivos = arquivosDaCifra(m);
+    if (arquivos.length > 0) {
+      await supabase.storage.from("cifras").remove(arquivos);
     }
     carregar();
   };
@@ -497,7 +508,8 @@ function GerenciarMusicas() {
     setStatus("⏳ Enviando cifra...");
 
     // Nome com timestamp para o cache offline pegar a versão nova ao substituir
-    const path = `${m.id}-${Date.now()}.pdf`;
+    const prefixo = `${m.id}-${Date.now()}`;
+    const path = `${prefixo}.pdf`;
     const { error: upError } = await supabase.storage
       .from("cifras")
       .upload(path, arquivo, { contentType: "application/pdf" });
@@ -509,12 +521,37 @@ function GerenciarMusicas() {
       return;
     }
 
-    if (m.cifra_path) {
-      await supabase.storage.from("cifras").remove([m.cifra_path]);
+    // Gera e sobe as imagens das páginas agora, uma única vez — assim quem
+    // abrir a cifra no celular só baixa imagens prontas, sem precisar
+    // renderizar o PDF na hora (o que era lento e, em aparelhos mais
+    // fracos, arriscado). Se isso falhar, a cifra ainda funciona — Cifra.jsx
+    // cai pro PDF direto, só sem a abertura rápida.
+    let totalPaginas = 0;
+    try {
+      // Import dinâmico: pdf.js é pesado, só baixa quando alguém realmente
+      // for enviar/reprocessar uma cifra, não pra qualquer visitante do site
+      const { pdfParaImagensJpeg } = await import("../lib/pdfParaImagens");
+      const imagens = await pdfParaImagensJpeg(arquivo, (atual, total) => {
+        setStatus(`⏳ Preparando página ${atual}/${total}...`);
+      });
+      for (let i = 0; i < imagens.length; i++) {
+        const { error: imgError } = await supabase.storage
+          .from("cifras")
+          .upload(`${prefixo}-p${i + 1}.jpg`, imagens[i], { contentType: "image/jpeg" });
+        if (imgError) throw imgError;
+      }
+      totalPaginas = imagens.length;
+    } catch (e) {
+      console.error("Falha ao gerar imagens das páginas da cifra:", e);
+    }
+
+    const arquivosAntigos = arquivosDaCifra(m);
+    if (arquivosAntigos.length > 0) {
+      await supabase.storage.from("cifras").remove(arquivosAntigos);
     }
     const { error: dbError } = await supabase
       .from("musicas")
-      .update({ cifra_path: path })
+      .update({ cifra_path: path, cifra_paginas: totalPaginas || null })
       .eq("id", m.id);
 
     if (dbError) {
@@ -864,6 +901,7 @@ function AbaCifras() {
   const [progresso, setProgresso] = useState(() => estadoDownloadCifras());
   const [modalAberto, setModalAberto] = useState(false);
   const [armazenamentoPersistente, setArmazenamentoPersistente] = useState(null); // null = verificando
+  const [reprocessando, setReprocessando] = useState(null); // { atual, total, nome } ou null
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -883,7 +921,7 @@ function AbaCifras() {
   const carregar = () =>
     supabase
       .from("musicas")
-      .select("id, nome, artista, estilo, cifra_path")
+      .select("id, nome, artista, estilo, cifra_path, cifra_paginas")
       .not("cifra_path", "is", null)
       .order("nome")
       .order("artista")
@@ -915,18 +953,61 @@ function AbaCifras() {
     setModalAberto(true);
   };
 
+  // Cifras enviadas antes dessa funcionalidade só têm o PDF — abrem devagar
+  // porque o celular precisa renderizar o PDF na hora. Esse botão gera as
+  // imagens pra elas também, sem precisar reenviar o PDF de novo.
+  const semImagens = musicas.filter((m) => !m.cifra_paginas);
+
+  const reprocessarCifrasAntigas = async () => {
+    if (semImagens.length === 0 || reprocessando) return;
+    const { pdfParaImagensJpeg } = await import("../lib/pdfParaImagens");
+    for (const [i, m] of semImagens.entries()) {
+      setReprocessando({ atual: i + 1, total: semImagens.length, nome: m.nome });
+      try {
+        const prefixo = m.cifra_path.replace(/\.pdf$/, "");
+        const { data: pub } = supabase.storage.from("cifras").getPublicUrl(m.cifra_path);
+        const imagens = await pdfParaImagensJpeg(pub.publicUrl);
+        for (let p = 0; p < imagens.length; p++) {
+          const { error } = await supabase.storage
+            .from("cifras")
+            .upload(`${prefixo}-p${p + 1}.jpg`, imagens[p], { contentType: "image/jpeg" });
+          if (error) throw error;
+        }
+        await supabase.from("musicas").update({ cifra_paginas: imagens.length }).eq("id", m.id);
+      } catch (e) {
+        console.error(`Falha ao reprocessar "${m.nome}":`, e);
+      }
+    }
+    setReprocessando(null);
+    carregar();
+  };
+
   return (
     <div className="border border-noir-700 rounded-2xl p-5 bg-noir-900/50">
       <div className="flex items-center justify-between gap-4 mb-3 flex-wrap">
         <h2 className="section-title text-sm">Cifras ({musicas.length})</h2>
-        <button
-          onClick={cliqueBaixar}
-          disabled={musicas.length === 0}
-          title="Guarda o PDF de todas as cifras no cache do navegador, para uso offline no show"
-          className="px-3 py-1.5 rounded-lg border border-noir-700 text-xs text-cream-muted hover:text-gold-300 hover:border-gold-600 transition disabled:opacity-40"
-        >
-          {progresso.baixando ? `⏳ Baixando ${progresso.feito}/${progresso.total}` : "Baixar"}
-        </button>
+        <div className="flex gap-2 flex-wrap">
+          {semImagens.length > 0 && (
+            <button
+              onClick={reprocessarCifrasAntigas}
+              disabled={!!reprocessando}
+              title="Gera as imagens das páginas pras cifras enviadas antes dessa funcionalidade existir — deixa a abertura no celular bem mais rápida"
+              className="px-3 py-1.5 rounded-lg border border-gold-600 text-xs text-gold-300 hover:bg-noir-800 transition disabled:opacity-40"
+            >
+              {reprocessando
+                ? `⏳ ${reprocessando.atual}/${reprocessando.total}...`
+                : `🔁 Acelerar cifras antigas (${semImagens.length})`}
+            </button>
+          )}
+          <button
+            onClick={cliqueBaixar}
+            disabled={musicas.length === 0}
+            title="Guarda o PDF de todas as cifras no cache do navegador, para uso offline no show"
+            className="px-3 py-1.5 rounded-lg border border-noir-700 text-xs text-cream-muted hover:text-gold-300 hover:border-gold-600 transition disabled:opacity-40"
+          >
+            {progresso.baixando ? `⏳ Baixando ${progresso.feito}/${progresso.total}` : "Baixar"}
+          </button>
+        </div>
       </div>
       <div className="mb-3">
         <p className="text-xs text-cream-muted">
