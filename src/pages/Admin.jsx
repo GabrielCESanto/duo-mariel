@@ -317,8 +317,12 @@ function Painel() {
         </AbaBotao>
 
         <div className="relative ml-auto">
-          <AbaBotao ativa={estaEmOutros} onClick={() => setMenuOutrosAberto((v) => !v)}>
-            ☰ Menu ▾
+          <AbaBotao
+            ativa={estaEmOutros}
+            onClick={() => setMenuOutrosAberto((v) => !v)}
+            className="px-8 py-3 text-xl"
+          >
+            <span className="text-gold-400">☰</span> Menu ▾
           </AbaBotao>
           {menuOutrosAberto && (
             <>
@@ -418,7 +422,7 @@ function NovoPedidoPopup({ pedido, cifraId, onFechar, onVerPedidos, onVerCifra }
   );
 }
 
-function AbaBotao({ ativa, onClick, children }) {
+function AbaBotao({ ativa, onClick, children, className = "" }) {
   return (
     <button
       onClick={onClick}
@@ -426,7 +430,7 @@ function AbaBotao({ ativa, onClick, children }) {
         ativa
           ? "btn-gold border-transparent"
           : "border-noir-700 text-cream-muted hover:text-cream hover:border-noir-600"
-      }`}
+      } ${className}`}
     >
       {children}
     </button>
