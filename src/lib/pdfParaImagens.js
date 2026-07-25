@@ -5,7 +5,7 @@ pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
 const MAX_PIXELS = 12_000_000;
 const MAX_DIMENSAO = 4096;
-const TIMEOUT_PAGINA_MS = 45_000;
+const TIMEOUT_PAGINA_MS = 90_000;
 const LARGURA_BASE = 1000;
 const ZOOM_ALVO = 2.0; // cobre bem até 200% de zoom com nitidez
 

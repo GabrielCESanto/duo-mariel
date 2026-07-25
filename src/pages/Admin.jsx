@@ -13,19 +13,32 @@ import { buscarMusicasApi, existeNoItunes } from "../lib/preview";
 
 const BASE = import.meta.env.BASE_URL;
 
-// Sobe uma imagem de página de cifra. Se já existir um arquivo nesse
-// caminho (de uma tentativa anterior que parou no meio), remove e tenta de
-// novo — usar upsert:true em vez disso esbarrava numa política de RLS do
-// Storage ("new row violates row-level security policy"). Só remove
-// quando o upload direto falhar por já existir, pra não apagar um arquivo
-// bom antes de confirmar que o novo upload vai dar certo.
+// Sobe uma imagem de página de cifra, com até 3 tentativas:
+// - Se já existir um arquivo nesse caminho (de uma tentativa anterior que
+//   parou no meio), remove e tenta de novo — usar upsert:true em vez disso
+//   esbarrava numa política de RLS do Storage ("new row violates
+//   row-level security policy"). Só remove quando o upload direto falhar
+//   por já existir, pra não apagar um arquivo bom antes de confirmar que
+//   o novo upload vai dar certo.
+// - Se for um erro transitório do servidor (502/503/504 Bad
+//   Gateway/indisponível), espera um pouco e tenta de novo — geralmente
+//   passa numa segunda tentativa.
 const subirImagemPagina = async (path, blob) => {
-  const resultado = await supabase.storage
-    .from("cifras")
-    .upload(path, blob, { contentType: "image/jpeg" });
-  if (resultado.error?.message?.includes("already exists")) {
-    await supabase.storage.from("cifras").remove([path]);
-    return supabase.storage.from("cifras").upload(path, blob, { contentType: "image/jpeg" });
+  let resultado;
+  for (let tentativa = 1; tentativa <= 3; tentativa++) {
+    resultado = await supabase.storage
+      .from("cifras")
+      .upload(path, blob, { contentType: "image/jpeg" });
+    if (!resultado.error) return resultado;
+
+    const msg = resultado.error.message ?? "";
+    if (msg.includes("already exists")) {
+      await supabase.storage.from("cifras").remove([path]);
+    } else if (/\b50[0-4]\b/.test(msg) && tentativa < 3) {
+      await new Promise((r) => setTimeout(r, 1000 * tentativa));
+    } else {
+      break; // erro definitivo — não vale a pena repetir
+    }
   }
   return resultado;
 };
