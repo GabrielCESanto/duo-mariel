@@ -573,7 +573,7 @@ export default function Cifra() {
                 <button
                   onClick={() => setRodando((r) => !r)}
                   aria-label={rodando ? "Pausar" : "Rolar"}
-                  className="btn-gold w-24 h-16 md:w-40 md:h-28 rounded-2xl text-3xl md:text-5xl"
+                  className="btn-gold w-24 h-10 md:w-40 md:h-16 rounded-2xl text-2xl md:text-4xl"
                 >
                   {rodando ? "❚❚" : "▶"}
                 </button>
@@ -618,7 +618,7 @@ export default function Cifra() {
 
         <div className="gold-rule my-3 md:my-4" />
 
-        <div className="flex items-center gap-2 px-1">
+        <div className="relative flex items-center justify-center gap-2 px-1">
           <button
             onClick={alternarFavorito}
             aria-label={musica?.favorito ? "Remover dos favoritos" : "Marcar como favorita"}
@@ -628,7 +628,7 @@ export default function Cifra() {
           >
             {musica?.favorito ? "★" : "☆"}
           </button>
-          <div className="min-w-0 flex-1 truncate">
+          <div className="min-w-0 truncate">
             <span className="font-display text-gold-300 text-base md:text-xl tracking-wide">
               {musica?.nome}
             </span>
@@ -642,7 +642,7 @@ export default function Cifra() {
             )}
           </div>
           {mostrarInfoRapida && (
-            <span className="shrink-0 text-cream-muted/50 text-xs md:text-sm transition-opacity">
+            <span className="absolute right-1 text-cream-muted/50 text-xs md:text-sm transition-opacity">
               ({Math.round(zoom * 100)}% • {velocidade}px/s)
             </span>
           )}

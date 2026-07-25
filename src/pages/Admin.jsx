@@ -200,12 +200,12 @@ function Login() {
   );
 }
 
-// Abas agrupadas no menu "Outros" — tudo que não é Cifras/Pedidos
+// Abas agrupadas no "Menu" — tudo que não é Cifras/Pedidos
 const ABAS_OUTROS = [
   ["afinador", "Afinador"],
   ["agenda", "Agenda"],
   ["aprender", "Aprender"],
-  ["musicas", "Adicionar Músicas"],
+  ["musicas", "Músicas"],
   ["videos", "Vídeos"],
 ];
 
@@ -233,9 +233,11 @@ function Painel() {
       });
   }, []);
 
+  // "Músicas" sempre em primeiro; o resto, alfabético
   const abasOutros = (GOATCOUNTER_CODE ? [...ABAS_OUTROS, ["acessos", "Acessos"]] : ABAS_OUTROS)
     .slice()
-    .sort((a, b) => a[1].localeCompare(b[1], "pt-BR"));
+    .sort((a, b) => a[1].localeCompare(b[1], "pt-BR"))
+    .sort((a, b) => (a[0] === "musicas" ? -1 : b[0] === "musicas" ? 1 : 0));
   const estaEmOutros = abasOutros.some(([valor]) => valor === aba);
 
   const contarPendentes = async () => {
@@ -314,7 +316,7 @@ function Painel() {
 
         <div className="relative ml-auto">
           <AbaBotao ativa={estaEmOutros} onClick={() => setMenuOutrosAberto((v) => !v)}>
-            Outros ▾
+            Menu ▾
           </AbaBotao>
           {menuOutrosAberto && (
             <>
@@ -329,6 +331,8 @@ function Painel() {
                       setMenuOutrosAberto(false);
                     }}
                     className={`w-full text-left px-4 py-2.5 text-sm transition ${
+                      valor === "musicas" ? "font-semibold" : ""
+                    } ${
                       aba === valor
                         ? "text-gold-300 bg-noir-800"
                         : "text-cream-muted hover:bg-noir-800 hover:text-cream"
