@@ -560,7 +560,13 @@ function GerenciarMusicas() {
       for (let i = 0; i < imagens.length; i++) {
         const { error: imgError } = await supabase.storage
           .from("cifras")
-          .upload(`${prefixo}-p${i + 1}.jpg`, imagens[i], { contentType: "image/jpeg" });
+          // upsert: uma tentativa anterior pode ter subido essa mesma
+          // página antes de falhar numa página seguinte — sem isso, tentar
+          // de novo trava com "The resource already exists"
+          .upload(`${prefixo}-p${i + 1}.jpg`, imagens[i], {
+            contentType: "image/jpeg",
+            upsert: true,
+          });
         if (imgError) throw imgError;
       }
       totalPaginas = imagens.length;
@@ -993,13 +999,22 @@ function AbaCifras() {
         for (let p = 0; p < imagens.length; p++) {
           const { error } = await supabase.storage
             .from("cifras")
-            .upload(`${prefixo}-p${p + 1}.jpg`, imagens[p], { contentType: "image/jpeg" });
+            // upsert: uma tentativa anterior desse mesmo reprocessamento
+            // pode ter subido essa página antes de falhar numa seguinte
+            .upload(`${prefixo}-p${p + 1}.jpg`, imagens[p], {
+              contentType: "image/jpeg",
+              upsert: true,
+            });
           if (error) throw error;
         }
         await supabase.from("musicas").update({ cifra_paginas: imagens.length }).eq("id", m.id);
       } catch (e) {
         console.error(`Falha ao reprocessar "${m.nome}":`, e);
       }
+      // Respira entre uma música e outra — processar várias em sequência
+      // sem pausa é o que fazia páginas mais à frente no lote estourarem o
+      // timeout de segurança
+      await new Promise((resolve) => setTimeout(resolve, 300));
     }
     setReprocessando(null);
     carregar();

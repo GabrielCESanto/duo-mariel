@@ -5,7 +5,7 @@ pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
 const MAX_PIXELS = 12_000_000;
 const MAX_DIMENSAO = 4096;
-const TIMEOUT_PAGINA_MS = 30_000;
+const TIMEOUT_PAGINA_MS = 45_000;
 const LARGURA_BASE = 1000;
 const ZOOM_ALVO = 2.0; // cobre bem até 200% de zoom com nitidez
 
@@ -54,6 +54,12 @@ export async function pdfParaImagensJpeg(origem, onProgresso) {
       if (!blob) throw new Error(`Falha ao converter a página ${i} em imagem`);
 
       paginas.push(blob);
+
+      // Devolve o controle ao navegador entre páginas — sem isso, processar
+      // várias músicas em sequência (reprocessamento em lote) sobrecarrega
+      // a thread principal sem pausa nenhuma, o que pode fazer páginas
+      // seguintes demorarem tanto que estouram o timeout de segurança
+      await new Promise((resolve) => requestAnimationFrame(resolve));
     }
     return paginas;
   } finally {
