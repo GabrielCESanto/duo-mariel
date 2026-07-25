@@ -1444,6 +1444,7 @@ function GerenciarSugestoes() {
   const [form, setForm] = useState({ musica: "", artista: "", para: "Ambos" });
   const [status, setStatus] = useState("");
   const [filtroPara, setFiltroPara] = useState(() => new Set(OPCOES_PARA));
+  const [soRevisao, setSoRevisao] = useState(false);
   const [repertorio, setRepertorio] = useState(() => new Set());
   const [sugestaoParaMover, setSugestaoParaMover] = useState(null);
 
@@ -1706,6 +1707,18 @@ function GerenciarSugestoes() {
               {o} ({sugestoes.filter((s) => (s.para ?? "Ambos") === o).length})
             </button>
           ))}
+          <button
+            onClick={() => setSoRevisao((v) => !v)}
+            title="Mostrar só as músicas marcadas para revisão na tela da cifra"
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs tracking-wide transition border ${
+              soRevisao
+                ? "btn-gold border-transparent"
+                : "border-noir-700 text-cream-muted hover:text-cream"
+            }`}
+          >
+            <Icone nome="olho" className="w-3.5 h-3.5" />
+            Revisão ({sugestoes.filter((s) => s.origem === "revisao").length})
+          </button>
         </div>
 
         {carregando ? (
@@ -1714,6 +1727,7 @@ function GerenciarSugestoes() {
           <ul className="divide-y divide-noir-800 max-h-[480px] overflow-y-auto pr-2">
             {sugestoes
               .filter((s) => filtroPara.has(s.para ?? "Ambos"))
+              .filter((s) => !soRevisao || s.origem === "revisao")
               .map((s) => (
               <li key={s.id} className="py-3 flex items-center justify-between gap-3">
                 <div className="min-w-0">

@@ -83,6 +83,21 @@ function detectarFrequencia(buffer, sampleRate) {
   return periodo > 0 ? sampleRate / periodo : -1;
 }
 
+// Tamanho do histórico de leituras válidas usado pra suavizar a frequência
+// exibida (mediana das últimas N) — sem isso, cada frame (60x/s) mostra a
+// leitura bruta da autocorrelação, que varia bastante de um frame pro outro
+// (ruído, harmônicos, o ataque da corda) e fazia a nota piscar/trocar rápido
+// demais mesmo tocando uma corda só
+const HISTORICO_TAMANHO = 8;
+// Não atualiza a nota exibida mais rápido que isso — a corda não muda de
+// verdade a esse ritmo, então atualizar a cada frame só deixa a leitura
+// bruta (com ruído) piscando na tela
+const INTERVALO_ATUALIZACAO_MS = 120;
+// Frames seguidos sem detecção válida até considerar "silêncio de verdade"
+// e limpar a nota — uma corda dedilhada tem altos e baixos naturais de
+// volume, então um único frame sem sinal não pode apagar a nota na hora
+const FRAMES_ATE_SILENCIO = 20;
+
 export default function Afinador() {
   const [ouvindo, setOuvindo] = useState(false);
   const [erro, setErro] = useState("");
@@ -92,6 +107,9 @@ export default function Afinador() {
   const streamRef = useRef(null);
   const rafRef = useRef(null);
   const bufferRef = useRef(null);
+  const historicoRef = useRef([]);
+  const framesSilencioRef = useRef(0);
+  const ultimaAtualizacaoRef = useRef(0);
 
   const pararEscuta = () => {
     cancelAnimationFrame(rafRef.current);
@@ -99,6 +117,8 @@ export default function Afinador() {
     audioCtxRef.current?.close().catch(() => {});
     streamRef.current = null;
     audioCtxRef.current = null;
+    historicoRef.current = [];
+    framesSilencioRef.current = 0;
     setOuvindo(false);
     setFrequencia(null);
   };
@@ -120,13 +140,40 @@ export default function Afinador() {
       analiser.fftSize = 2048;
       fonte.connect(analiser);
       bufferRef.current = new Float32Array(analiser.fftSize);
+      historicoRef.current = [];
+      framesSilencioRef.current = 0;
+      ultimaAtualizacaoRef.current = 0;
 
       setOuvindo(true);
 
       const loop = () => {
         analiser.getFloatTimeDomainData(bufferRef.current);
-        const freq = detectarFrequencia(bufferRef.current, ctx.sampleRate);
-        setFrequencia(freq > 0 ? freq : null);
+        const freqBruta = detectarFrequencia(bufferRef.current, ctx.sampleRate);
+
+        if (freqBruta > 0) {
+          framesSilencioRef.current = 0;
+          const historico = historicoRef.current;
+          historico.push(freqBruta);
+          if (historico.length > HISTORICO_TAMANHO) historico.shift();
+        } else {
+          framesSilencioRef.current++;
+          if (framesSilencioRef.current > FRAMES_ATE_SILENCIO) historicoRef.current = [];
+        }
+
+        const agora = performance.now();
+        if (agora - ultimaAtualizacaoRef.current >= INTERVALO_ATUALIZACAO_MS) {
+          ultimaAtualizacaoRef.current = agora;
+          const historico = historicoRef.current;
+          if (historico.length === 0) {
+            setFrequencia(null);
+          } else {
+            // Mediana em vez de média: um único harmônico/ruído fora da
+            // curva não arrasta o resultado como puxaria numa média
+            const ordenado = [...historico].sort((a, b) => a - b);
+            setFrequencia(ordenado[Math.floor(ordenado.length / 2)]);
+          }
+        }
+
         rafRef.current = requestAnimationFrame(loop);
       };
       loop();
@@ -165,7 +212,7 @@ export default function Afinador() {
           </p>
 
           {/* Ponteiro de desvio (-50 a +50 centavos) */}
-          <div className="relative h-3 mt-6 mb-2 rounded-full bg-noir-800 overflow-hidden">
+          <div className="relative h-9 mt-6 mb-2 rounded-full bg-noir-800 overflow-hidden">
             <div className="absolute inset-y-0 left-1/2 w-px bg-noir-600" />
             {corda && (
               <div
