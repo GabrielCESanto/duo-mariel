@@ -202,11 +202,11 @@ function Login() {
 
 // Abas agrupadas no "Menu" — tudo que não é Cifras/Pedidos
 const ABAS_OUTROS = [
-  ["afinador", "Afinador"],
-  ["agenda", "Agenda"],
-  ["aprender", "Aprender"],
-  ["musicas", "Músicas"],
-  ["videos", "Vídeos"],
+  ["afinador", "Afinador", "🎸"],
+  ["agenda", "Agenda", "📅"],
+  ["aprender", "Aprender", "🎧"],
+  ["musicas", "Músicas", "🎵"],
+  ["videos", "Vídeos", "🎬"],
 ];
 
 function Painel() {
@@ -234,7 +234,9 @@ function Painel() {
   }, []);
 
   // "Músicas" sempre em primeiro; o resto, alfabético
-  const abasOutros = (GOATCOUNTER_CODE ? [...ABAS_OUTROS, ["acessos", "Acessos"]] : ABAS_OUTROS)
+  const abasOutros = (
+    GOATCOUNTER_CODE ? [...ABAS_OUTROS, ["acessos", "Acessos", "📊"]] : ABAS_OUTROS
+  )
     .slice()
     .sort((a, b) => a[1].localeCompare(b[1], "pt-BR"))
     .sort((a, b) => (a[0] === "musicas" ? -1 : b[0] === "musicas" ? 1 : 0));
@@ -303,10 +305,10 @@ function Painel() {
 
       <div className="flex flex-wrap gap-2 mb-6 items-center">
         <AbaBotao ativa={aba === "cifras"} onClick={() => setAba("cifras")}>
-          Cifras
+          🎼 Cifras
         </AbaBotao>
         <AbaBotao ativa={aba === "pedidos"} onClick={() => setAba("pedidos")}>
-          Pedidos
+          🎶 Pedidos
           {pendentes > 0 && (
             <span className="ml-2 inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full bg-gold-500 text-noir-900 text-[11px] font-semibold align-middle">
               {pendentes}
@@ -316,14 +318,14 @@ function Painel() {
 
         <div className="relative ml-auto">
           <AbaBotao ativa={estaEmOutros} onClick={() => setMenuOutrosAberto((v) => !v)}>
-            Menu ▾
+            ☰ Menu ▾
           </AbaBotao>
           {menuOutrosAberto && (
             <>
               {/* Captura o clique fora do menu pra fechar */}
               <div className="fixed inset-0 z-10" onClick={() => setMenuOutrosAberto(false)} />
               <div className="absolute right-0 mt-2 w-48 rounded-xl border border-noir-700 bg-noir-900 shadow-xl z-20 overflow-hidden">
-                {abasOutros.map(([valor, rotulo]) => (
+                {abasOutros.map(([valor, rotulo, icone]) => (
                   <button
                     key={valor}
                     onClick={() => {
@@ -338,7 +340,7 @@ function Painel() {
                         : "text-cream-muted hover:bg-noir-800 hover:text-cream"
                     }`}
                   >
-                    {rotulo}
+                    {icone} {rotulo}
                   </button>
                 ))}
               </div>
