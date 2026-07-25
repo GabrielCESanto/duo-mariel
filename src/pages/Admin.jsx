@@ -1058,6 +1058,16 @@ function AbaCifras() {
     setModalAberto(true);
   };
 
+  const alternarFavorito = async (m) => {
+    const novoValor = !m.favorito;
+    setMusicas((lista) => lista.map((x) => (x.id === m.id ? { ...x, favorito: novoValor } : x)));
+    const { error } = await supabase.from("musicas").update({ favorito: novoValor }).eq("id", m.id);
+    if (error) {
+      console.error(error);
+      setMusicas((lista) => lista.map((x) => (x.id === m.id ? { ...x, favorito: m.favorito } : x)));
+    }
+  };
+
   // Cifras enviadas antes dessa funcionalidade só têm o PDF — abrem devagar
   // porque o celular precisa renderizar o PDF na hora. Esse botão gera as
   // imagens pra elas também, sem precisar reenviar o PDF de novo.
@@ -1164,10 +1174,19 @@ function AbaCifras() {
       ) : (
         <ul className="divide-y divide-noir-800 max-h-[560px] overflow-y-auto pr-2">
           {visiveis.map((m) => (
-            <li key={m.id}>
+            <li key={m.id} className="flex items-center gap-1">
+              <button
+                onClick={() => alternarFavorito(m)}
+                aria-label={m.favorito ? "Remover dos favoritos" : "Marcar como favorita"}
+                className={`shrink-0 w-8 h-8 flex items-center justify-center text-lg transition ${
+                  m.favorito ? "text-gold-400" : "text-noir-600 hover:text-gold-300"
+                }`}
+              >
+                {m.favorito ? "★" : "☆"}
+              </button>
               <button
                 onClick={() => navigate(`/cifra/${m.id}`)}
-                className="w-full py-3 flex items-center justify-between gap-3 text-left hover:bg-noir-800/50 rounded-lg px-2 -mx-2 transition"
+                className="flex-1 min-w-0 py-3 flex items-center justify-between gap-3 text-left hover:bg-noir-800/50 rounded-lg px-2 -mx-2 transition"
               >
                 <div className="min-w-0">
                   <p className="text-cream truncate">{m.nome}</p>
@@ -2226,35 +2245,62 @@ const PREFIXO_SUGESTAO = "[Sugestão]";
 const nomeDoPedido = (textoPedido) =>
   textoPedido.replace(PREFIXO_SUGESTAO, "").trim().split(" — ")[0].trim();
 
+const DIAS_ATE_ARQUIVAR = 15;
+const dataCorteArquivo = () => {
+  const d = new Date();
+  d.setDate(d.getDate() - DIAS_ATE_ARQUIVAR);
+  return d.toISOString();
+};
+
 function GerenciarPedidos({ onMudanca }) {
   const [pedidos, setPedidos] = useState([]);
   const [carregando, setCarregando] = useState(true);
-  const [mostrar, setMostrar] = useState("pendentes"); // pendentes | atendidos
+  const [mostrar, setMostrar] = useState("pendentes"); // pendentes | atendidos | arquivados
   // Contagem separada (query leve, sem limite) — evita o badge dizer "12
   // pendentes" enquanto a lista, limitada, mostra só alguns deles
-  const [contagens, setContagens] = useState({ pendentes: 0, atendidos: 0 });
+  const [contagens, setContagens] = useState({ pendentes: 0, atendidos: 0, arquivados: 0 });
   const [cifraPorNome, setCifraPorNome] = useState({});
   const [pedidoAberto, setPedidoAberto] = useState(null);
+  const [filtroDe, setFiltroDe] = useState("");
+  const [filtroAte, setFiltroAte] = useState("");
   const navigate = useNavigate();
 
   const atualizarContagens = async () => {
-    const [{ count: pendentes }, { count: atendidos }] = await Promise.all([
+    const corte = dataCorteArquivo();
+    const [{ count: pendentes }, { count: atendidos }, { count: arquivados }] = await Promise.all([
       supabase.from("pedidos").select("*", { count: "exact", head: true }).eq("atendido", false),
-      supabase.from("pedidos").select("*", { count: "exact", head: true }).eq("atendido", true),
+      supabase
+        .from("pedidos")
+        .select("*", { count: "exact", head: true })
+        .eq("atendido", true)
+        .gte("created_at", corte),
+      supabase
+        .from("pedidos")
+        .select("*", { count: "exact", head: true })
+        .eq("atendido", true)
+        .lt("created_at", corte),
     ]);
-    setContagens({ pendentes: pendentes ?? 0, atendidos: atendidos ?? 0 });
+    setContagens({
+      pendentes: pendentes ?? 0,
+      atendidos: atendidos ?? 0,
+      arquivados: arquivados ?? 0,
+    });
   };
 
   const carregar = async (mostrarLoading = true) => {
     if (mostrarLoading) setCarregando(true);
-    // Pendentes é a fila de trabalho: busca todos. Atendidos é só histórico:
-    // limita a 100 para não pesar a consulta.
-    const { data, error } = await supabase
-      .from("pedidos")
-      .select("*")
-      .eq("atendido", mostrar === "atendidos")
-      .order("created_at", { ascending: false })
-      .limit(mostrar === "atendidos" ? 100 : 500);
+    // Pendentes é a fila de trabalho: busca todos. Atendidos (últimos 15
+    // dias) e Arquivados (mais antigos que isso) são só histórico: limita
+    // a 200 pra não pesar a consulta.
+    let query = supabase.from("pedidos").select("*");
+    if (mostrar === "pendentes") {
+      query = query.eq("atendido", false).limit(500);
+    } else if (mostrar === "atendidos") {
+      query = query.eq("atendido", true).gte("created_at", dataCorteArquivo()).limit(200);
+    } else {
+      query = query.eq("atendido", true).lt("created_at", dataCorteArquivo()).limit(200);
+    }
+    const { data, error } = await query.order("created_at", { ascending: false });
     if (!error) setPedidos(data ?? []);
     setCarregando(false);
     atualizarContagens();
@@ -2268,6 +2314,18 @@ function GerenciarPedidos({ onMudanca }) {
     return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mostrar]);
+
+  // Filtro de data (só relevante pra Atendidos/Arquivados — Pendentes é a
+  // fila de trabalho, não faz sentido recortar por período)
+  const pedidosFiltrados =
+    mostrar === "pendentes"
+      ? pedidos
+      : pedidos.filter((p) => {
+          const dataPedido = new Date(p.created_at);
+          if (filtroDe && dataPedido < new Date(`${filtroDe}T00:00:00`)) return false;
+          if (filtroAte && dataPedido > new Date(`${filtroAte}T23:59:59`)) return false;
+          return true;
+        });
 
   useEffect(() => {
     // Mapa nome→cifra, para o botão "Ver cifra" no detalhe do pedido
@@ -2332,8 +2390,8 @@ function GerenciarPedidos({ onMudanca }) {
         </button>
       </div>
 
-      {/* Toggle pendentes / atendidos */}
-      <div className="flex gap-2 mb-3">
+      {/* Toggle pendentes / atendidos / arquivados */}
+      <div className="flex gap-2 mb-3 flex-wrap">
         <button
           onClick={() => setMostrar("pendentes")}
           className={`px-4 py-1.5 rounded-full text-xs tracking-wide transition border ${
@@ -2354,13 +2412,55 @@ function GerenciarPedidos({ onMudanca }) {
         >
           Atendidos ({contagens.atendidos})
         </button>
+        <button
+          onClick={() => setMostrar("arquivados")}
+          title={`Atendidos há mais de ${DIAS_ATE_ARQUIVAR} dias`}
+          className={`px-4 py-1.5 rounded-full text-xs tracking-wide transition border ${
+            mostrar === "arquivados"
+              ? "btn-gold border-transparent"
+              : "border-noir-700 text-cream-muted hover:text-cream"
+          }`}
+        >
+          🗄 Arquivados ({contagens.arquivados})
+        </button>
       </div>
+
+      {/* Filtro de data — só faz sentido pra histórico (Atendidos/Arquivados) */}
+      {mostrar !== "pendentes" && (
+        <div className="flex items-center gap-2 mb-3 flex-wrap">
+          <label className="text-xs text-cream-muted">De</label>
+          <input
+            type="date"
+            className="input-noir w-auto text-sm py-1.5"
+            value={filtroDe}
+            onChange={(e) => setFiltroDe(e.target.value)}
+          />
+          <label className="text-xs text-cream-muted">até</label>
+          <input
+            type="date"
+            className="input-noir w-auto text-sm py-1.5"
+            value={filtroAte}
+            onChange={(e) => setFiltroAte(e.target.value)}
+          />
+          {(filtroDe || filtroAte) && (
+            <button
+              onClick={() => {
+                setFiltroDe("");
+                setFiltroAte("");
+              }}
+              className="text-xs text-cream-muted hover:text-gold-300 transition"
+            >
+              ✕ Limpar
+            </button>
+          )}
+        </div>
+      )}
 
       {carregando ? (
         <p className="text-cream-muted text-sm py-4">Carregando...</p>
       ) : (
         <ul className="divide-y divide-noir-800">
-          {pedidos.map((p) => (
+          {pedidosFiltrados.map((p) => (
             <li key={p.id} className="flex items-start gap-2">
               <button
                 onClick={() => setPedidoAberto(p)}
@@ -2398,11 +2498,13 @@ function GerenciarPedidos({ onMudanca }) {
               )}
             </li>
           ))}
-          {pedidos.length === 0 && (
+          {pedidosFiltrados.length === 0 && (
             <li className="py-4 text-cream-muted text-sm">
               {mostrar === "pendentes"
                 ? "Nenhum pedido pendente. 🎉"
-                : "Nenhum pedido atendido ainda."}
+                : mostrar === "arquivados"
+                  ? "Nenhum pedido arquivado nesse período."
+                  : "Nenhum pedido atendido nesse período."}
             </li>
           )}
         </ul>
