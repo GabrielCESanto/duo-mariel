@@ -2855,7 +2855,7 @@ function GerenciarPedidos({ onMudanca }) {
           <label className="text-xs text-cream-muted shrink-0">Dia</label>
           <input
             type="date"
-            className="input-noir w-[12ch] text-sm py-1.5"
+            className="input-noir !w-1/4 text-sm py-1.5 shrink-0"
             value={filtroDia}
             onChange={(e) => setFiltroDia(e.target.value)}
           />
@@ -2875,14 +2875,14 @@ function GerenciarPedidos({ onMudanca }) {
           <label className="text-xs text-cream-muted shrink-0">De</label>
           <input
             type="date"
-            className="input-noir w-[12ch] text-sm py-1.5 shrink-0"
+            className="input-noir !w-1/4 text-sm py-1.5 shrink-0"
             value={filtroDe}
             onChange={(e) => setFiltroDe(e.target.value)}
           />
           <label className="text-xs text-cream-muted shrink-0">até</label>
           <input
             type="date"
-            className="input-noir w-[12ch] text-sm py-1.5 shrink-0"
+            className="input-noir !w-1/4 text-sm py-1.5 shrink-0"
             value={filtroAte}
             onChange={(e) => setFiltroAte(e.target.value)}
           />
