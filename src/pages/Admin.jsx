@@ -427,12 +427,12 @@ function Painel() {
           <span className="inline-flex items-center gap-2">
             <Icone nome="pedidos" className="w-5 h-5 text-gold-400" />
             Pedidos
+            {pendentes > 0 && (
+              <span className="inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full bg-gold-500 text-noir-900 text-[11px] font-semibold">
+                {pendentes}
+              </span>
+            )}
           </span>
-          {pendentes > 0 && (
-            <span className="ml-2 inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full bg-gold-500 text-noir-900 text-[11px] font-semibold align-middle">
-              {pendentes}
-            </span>
-          )}
         </AbaBotao>
 
         <div className="relative ml-auto">
@@ -571,7 +571,6 @@ function GerenciarMusicas() {
   const [status, setStatus] = useState("");
   const [enviandoCifraId, setEnviandoCifraId] = useState(null);
   const [filtroCifra, setFiltroCifra] = useState("todas"); // todas | com | sem
-  const [filtroRevisao, setFiltroRevisao] = useState(false);
 
   // --- Checagem no iTunes (resultado fica salvo no navegador) ---
   const [filtroItunes, setFiltroItunes] = useState(false);
@@ -806,7 +805,6 @@ function GerenciarMusicas() {
     if (filtroCifra === "com" && !m.cifra_path) return false;
     if (filtroCifra === "sem" && m.cifra_path) return false;
     if (filtroItunes && itunesMap[chaveItunes(m)] !== false) return false;
-    if (filtroRevisao && !m.revisao) return false;
     const q = filtro.trim().toLowerCase();
     if (!q) return true;
     return `${m.nome} ${m.artista} ${m.estilo ?? ""}`.toLowerCase().includes(q);
@@ -991,18 +989,6 @@ function GerenciarMusicas() {
             Sem iTunes ({musicas.filter((m) => itunesMap[chaveItunes(m)] === false).length})
           </button>
           <button
-            onClick={() => setFiltroRevisao((v) => !v)}
-            title="Mostrar só as músicas marcadas para revisão (ícone de olho na tela da cifra)"
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs tracking-wide transition border ${
-              filtroRevisao
-                ? "btn-gold border-transparent"
-                : "border-noir-700 text-cream-muted hover:text-cream"
-            }`}
-          >
-            <Icone nome="olho" className="w-3.5 h-3.5" />
-            Revisão ({musicas.filter((m) => m.revisao).length})
-          </button>
-          <button
             onClick={verificarItunes}
             disabled={!!verificandoItunes || carregando}
             title="Consulta cada música na busca do iTunes (roda uma vez e fica salvo)"
@@ -1172,7 +1158,7 @@ function AbaCifras() {
   const carregar = () =>
     supabase
       .from("musicas")
-      .select("id, nome, artista, estilo, cifra_path, cifra_paginas, cifra_versao, favorito, revisao")
+      .select("id, nome, artista, estilo, cifra_path, cifra_paginas, cifra_versao, favorito")
       .not("cifra_path", "is", null)
       .order("nome")
       .order("artista")
@@ -1336,15 +1322,7 @@ function AbaCifras() {
                 className="flex-1 min-w-0 py-3 flex items-center justify-between gap-3 text-left hover:bg-noir-800/50 rounded-lg px-2 -mx-2 transition"
               >
                 <div className="min-w-0">
-                  <p className="text-cream truncate flex items-center gap-1.5">
-                    {m.revisao && (
-                      <Icone
-                        nome="olho"
-                        className="w-3.5 h-3.5 text-gold-400/80 shrink-0"
-                      />
-                    )}
-                    <span className="truncate">{m.nome}</span>
-                  </p>
+                  <p className="text-cream truncate">{m.nome}</p>
                   <p className="text-cream-muted text-sm truncate">
                     {m.artista}
                     {m.estilo ? ` • ${m.estilo}` : ""}
@@ -1605,6 +1583,20 @@ function GerenciarSugestoes() {
     carregar();
   };
 
+  // A música em revisão já está no repertório — só sai da fila, sem passar
+  // pelo vínculo com o iTunes (isso já foi feito quando ela entrou)
+  const concluirRevisao = async (s) => {
+    const { error } = await supabase.from("sugestoes").delete().eq("id", s.id);
+    if (error) {
+      console.error(error);
+      setStatus("❌ Erro ao concluir a revisão.");
+      return;
+    }
+    setStatus(`✅ "${s.musica}" revisada!`);
+    setTimeout(() => setStatus(""), 2500);
+    carregar();
+  };
+
   return (
     <div>
       {/* Formulário */}
@@ -1732,6 +1724,15 @@ function GerenciarSugestoes() {
                         público
                       </span>
                     )}
+                    {s.origem === "revisao" && (
+                      <span
+                        title="Marcada para revisão na tela da cifra"
+                        className="ml-2 text-[10px] uppercase tracking-wider text-violet-300 border border-violet-700 rounded-full px-2 py-0.5"
+                      >
+                        <Icone nome="olho" className="w-2.5 h-2.5 inline -mt-0.5 mr-0.5" />
+                        revisão
+                      </span>
+                    )}
                     {(s.para ?? "Ambos") !== "Ambos" && (
                       <span className="ml-2 text-[10px] uppercase tracking-wider text-cream-muted border border-noir-600 rounded-full px-2 py-0.5">
                         {s.para}
@@ -1753,7 +1754,14 @@ function GerenciarSugestoes() {
                   )}
                 </div>
                 <div className="flex gap-2 shrink-0">
-                  {(s.para ?? "Ambos") === "Ambos" ? (
+                  {s.origem === "revisao" ? (
+                    <button
+                      onClick={() => concluirRevisao(s)}
+                      className="px-3 py-1.5 rounded-lg border border-noir-700 text-xs text-cream-muted hover:text-gold-300 hover:border-gold-600 transition"
+                    >
+                      ✓ Revisada
+                    </button>
+                  ) : (s.para ?? "Ambos") === "Ambos" ? (
                     <>
                       <BotaoConfirma rotulo="Gabs" ok={s.ok_gabs} onClick={() => confirmar(s, "ok_gabs")} />
                       <BotaoConfirma rotulo="Mari" ok={s.ok_mari} onClick={() => confirmar(s, "ok_mari")} />

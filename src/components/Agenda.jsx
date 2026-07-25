@@ -43,44 +43,99 @@ function formatarHora(hora) {
 }
 
 export default function Agenda() {
-  const [eventos, setEventos] = useState([]);
+  const [proximos, setProximos] = useState([]);
+  const [realizados, setRealizados] = useState([]);
   const [carregando, setCarregando] = useState(true);
+  const [verRealizados, setVerRealizados] = useState(false);
 
   useEffect(() => {
     if (!supabaseConfigured) {
-      setEventos(EVENTOS_DEMO);
+      setProximos(EVENTOS_DEMO);
       setCarregando(false);
       return;
     }
-    supabase
-      .from("eventos")
-      .select("id, titulo, local, data, hora, observacao")
-      .gte("data", dataDaqui(-1))
-      .order("data")
-      .order("hora")
-      .then(({ data, error }) => {
-        if (!error) setEventos(data ?? []);
-        setCarregando(false);
-      });
+    const hoje = dataDaqui(0);
+    Promise.all([
+      supabase
+        .from("eventos")
+        .select("id, titulo, local, data, hora, observacao")
+        .gte("data", hoje)
+        .order("data")
+        .order("hora"),
+      // Mostra os shows já realizados também — dá pra quem visita ver que o
+      // duo realmente toca por aí, não só os próximos compromissos
+      supabase
+        .from("eventos")
+        .select("id, titulo, local, data, hora, observacao")
+        .lt("data", hoje)
+        .order("data", { ascending: false })
+        .order("hora", { ascending: false })
+        .limit(8),
+    ]).then(([{ data: prox, error: e1 }, { data: real, error: e2 }]) => {
+      if (!e1) setProximos(prox ?? []);
+      if (!e2) setRealizados(real ?? []);
+      setCarregando(false);
+    });
   }, []);
 
-  // Sem eventos futuros, a seção não aparece para o visitante
-  if (!carregando && eventos.length === 0) return null;
+  // Sem show nenhum (nem futuro, nem passado), a seção não aparece
+  if (!carregando && proximos.length === 0 && realizados.length === 0) return null;
+
+  const mostrarToggle = realizados.length > 0;
+  const eventos = verRealizados ? realizados : proximos;
 
   return (
     <section className="border border-noir-700 rounded-2xl p-6 mt-10 bg-noir-900/50">
-      <h2 className="section-title text-lg mb-4">Agenda de shows</h2>
+      <div className="flex items-center justify-between gap-4 mb-4 flex-wrap">
+        <h2 className="section-title text-lg">Agenda de shows</h2>
+        {mostrarToggle && (
+          <div className="flex gap-2">
+            <button
+              onClick={() => setVerRealizados(false)}
+              className={`px-3 py-1.5 rounded-full text-xs tracking-wide transition border ${
+                !verRealizados
+                  ? "btn-gold border-transparent"
+                  : "border-noir-700 text-cream-muted hover:text-cream"
+              }`}
+            >
+              Próximos
+            </button>
+            <button
+              onClick={() => setVerRealizados(true)}
+              className={`px-3 py-1.5 rounded-full text-xs tracking-wide transition border ${
+                verRealizados
+                  ? "btn-gold border-transparent"
+                  : "border-noir-700 text-cream-muted hover:text-cream"
+              }`}
+            >
+              Já tocamos
+            </button>
+          </div>
+        )}
+      </div>
 
       {carregando ? (
         <p className="text-cream-muted text-sm py-4">Carregando agenda...</p>
+      ) : eventos.length === 0 ? (
+        <p className="text-cream-muted text-sm py-4">
+          {verRealizados ? "Nenhum show realizado ainda." : "Nenhum show marcado no momento."}
+        </p>
       ) : (
         <ul className="divide-y divide-noir-800">
           {eventos.slice(0, 8).map((ev) => {
             const d = dataLocal(ev.data);
             return (
               <li key={ev.id} className="py-3 flex items-center gap-4">
-                <div className="shrink-0 w-14 text-center rounded-xl border border-noir-700 py-1.5">
-                  <p className="text-gold-300 text-lg leading-none font-display">
+                <div
+                  className={`shrink-0 w-14 text-center rounded-xl border py-1.5 ${
+                    verRealizados ? "border-noir-800" : "border-noir-700"
+                  }`}
+                >
+                  <p
+                    className={`text-lg leading-none font-display ${
+                      verRealizados ? "text-cream-muted" : "text-gold-300"
+                    }`}
+                  >
                     {d.getDate()}
                   </p>
                   <p className="text-cream-muted text-[10px] uppercase tracking-wider mt-0.5">
@@ -88,7 +143,9 @@ export default function Agenda() {
                   </p>
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="text-cream truncate">{ev.titulo}</p>
+                  <p className={`truncate ${verRealizados ? "text-cream-muted" : "text-cream"}`}>
+                    {ev.titulo}
+                  </p>
                   <p className="text-cream-muted text-sm truncate">
                     {[ev.local, formatarHora(ev.hora)].filter(Boolean).join(" • ")}
                   </p>

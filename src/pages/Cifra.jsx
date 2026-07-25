@@ -67,6 +67,9 @@ export default function Cifra() {
   const { id } = useParams();
   const [sessao, setSessao] = useState(undefined); // undefined = verificando
   const [musica, setMusica] = useState(null);
+  // id da entrada em "sugestoes" (aba Aprender) enquanto a música está
+  // marcada para revisão; null quando não está marcada
+  const [revisaoId, setRevisaoId] = useState(null);
   const [erro, setErro] = useState("");
   const [tentativa, setTentativa] = useState(0); // botão "Tentar de novo" incrementa isso
   const [rodando, setRodando] = useState(false);
@@ -343,7 +346,7 @@ export default function Cifra() {
     (async () => {
       const { data: m, error } = await supabase
         .from("musicas")
-        .select("id, nome, artista, cifra_path, cifra_paginas, cifra_versao, favorito, revisao")
+        .select("id, nome, artista, cifra_path, cifra_paginas, cifra_versao, favorito")
         .eq("id", id)
         .single();
 
@@ -352,6 +355,20 @@ export default function Cifra() {
         setErro("Música não encontrada.");
         return;
       }
+
+      // A música em revisão manda uma entrada pra "sugestoes" (aba Aprender),
+      // junto com as demais — não é mais um campo isolado na própria música
+      supabase
+        .from("sugestoes")
+        .select("id")
+        .eq("musica", m.nome)
+        .eq("origem", "revisao")
+        .limit(1)
+        .maybeSingle()
+        .then(({ data: rev }) => {
+          if (!cancelado) setRevisaoId(rev?.id ?? null);
+        });
+
       if (!m.cifra_path) {
         setErro("Essa música ainda não tem cifra. Envie o PDF na aba Músicas.");
         setMusica(m);
@@ -541,16 +558,30 @@ export default function Cifra() {
     }
   };
 
-  // --- Em revisão (ícone de olho) — marca que a música precisa ser reensaiada ---
+  // --- Em revisão (ícone de olho) — manda a música pra aba Aprender, junto
+  // com as demais sugestões, até alguém marcar como revisada por lá ---
   const alternarRevisao = async () => {
     if (!musica) return;
-    const novoValor = !musica.revisao;
-    setMusica((m) => ({ ...m, revisao: novoValor })); // otimista
-    const { error } = await supabase.from("musicas").update({ revisao: novoValor }).eq("id", id);
+    if (revisaoId) {
+      const idAntigo = revisaoId;
+      setRevisaoId(null); // otimista
+      const { error } = await supabase.from("sugestoes").delete().eq("id", idAntigo);
+      if (error) {
+        console.error(error);
+        setRevisaoId(idAntigo); // desfaz se der erro
+      }
+      return;
+    }
+    const { data, error } = await supabase
+      .from("sugestoes")
+      .insert({ musica: musica.nome, artista: musica.artista, origem: "revisao", para: "Ambos" })
+      .select("id")
+      .single();
     if (error) {
       console.error(error);
-      setMusica((m) => ({ ...m, revisao: !novoValor })); // desfaz se der erro
+      return;
     }
+    setRevisaoId(data.id);
   };
 
   if (sessao === undefined) {
@@ -652,10 +683,10 @@ export default function Cifra() {
         <div className="relative flex items-center justify-center gap-2 px-1">
           <button
             onClick={alternarRevisao}
-            aria-label={musica?.revisao ? "Remover marcação de revisão" : "Marcar para revisão"}
-            title={musica?.revisao ? "Em revisão — precisa reensaiar" : "Marcar para revisão"}
+            aria-label={revisaoId ? "Remover da revisão" : "Marcar para revisão"}
+            title={revisaoId ? "Em revisão — está na aba Aprender" : "Marcar para revisão"}
             className={`absolute left-1 shrink-0 transition ${
-              musica?.revisao ? "text-gold-400" : "text-noir-600 hover:text-gold-300"
+              revisaoId ? "text-gold-400" : "text-noir-600 hover:text-gold-300"
             }`}
           >
             <IconeOlho className="w-5 h-5 md:w-6 md:h-6" />

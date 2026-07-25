@@ -15,10 +15,6 @@ create table if not exists public.musicas (
 -- Favorita (estrela) na tela de cifra — usada pra filtrar na aba Cifras
 alter table public.musicas add column if not exists favorito boolean not null default false;
 
--- Em revisão (ícone de olho) na tela de cifra — marca música que precisa
--- ser reensaiada/revista; usada pra filtrar na aba Músicas
-alter table public.musicas add column if not exists revisao boolean not null default false;
-
 alter table public.musicas enable row level security;
 
 -- Qualquer visitante pode LER o repertório
