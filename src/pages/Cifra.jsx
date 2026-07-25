@@ -321,7 +321,7 @@ export default function Cifra() {
     (async () => {
       const { data: m, error } = await supabase
         .from("musicas")
-        .select("id, nome, artista, cifra_path, cifra_paginas, cifra_versao")
+        .select("id, nome, artista, cifra_path, cifra_paginas, cifra_versao, favorito")
         .eq("id", id)
         .single();
 
@@ -500,6 +500,18 @@ export default function Cifra() {
     return () => window.removeEventListener("keydown", aoTeclar);
   }, []);
 
+  // --- Favorito (estrela) ---
+  const alternarFavorito = async () => {
+    if (!musica) return;
+    const novoValor = !musica.favorito;
+    setMusica((m) => ({ ...m, favorito: novoValor })); // otimista
+    const { error } = await supabase.from("musicas").update({ favorito: novoValor }).eq("id", id);
+    if (error) {
+      console.error(error);
+      setMusica((m) => ({ ...m, favorito: !novoValor })); // desfaz se der erro
+    }
+  };
+
   if (sessao === undefined) {
     return (
       <p className="text-cream-muted text-center py-20">Verificando acesso...</p>
@@ -521,13 +533,15 @@ export default function Cifra() {
 
   return (
     <div className={`${ALTURA_TELA_CLASSE} flex flex-col`}>
-      {/* Barra superior — controles numa linha, título/artista embaixo */}
-      <header className="border-b border-noir-800 bg-noir-900/90 shrink-0 px-3 py-3">
-        <div className="grid grid-cols-3 items-center gap-2">
+      {/* Barra superior — controles numa linha, título/artista embaixo.
+          Tamanhos crescem em telas maiores (md: = tablet) pra aproveitar o
+          espaço que sobra num celular fica menor, num tablet fica maior. */}
+      <header className="border-b border-noir-800 bg-noir-900/90 shrink-0 px-3 py-3 md:px-6 md:py-5">
+        <div className="grid grid-cols-3 items-center gap-2 md:gap-4">
           <div className="justify-self-start">
             <Link
               to="/admin?aba=cifras"
-              className="shrink-0 h-14 px-4 flex items-center rounded-xl border border-noir-700 text-cream-muted text-base font-medium hover:text-gold-300 hover:border-gold-600 transition"
+              className="shrink-0 h-14 md:h-20 px-4 md:px-6 flex items-center rounded-xl border border-noir-700 text-cream-muted text-base md:text-xl font-medium hover:text-gold-300 hover:border-gold-600 transition"
             >
               ‹ Voltar
             </Link>
@@ -535,13 +549,13 @@ export default function Cifra() {
 
           {!erro && (
             <>
-              <div className="flex items-center gap-2 justify-self-center">
+              <div className="flex items-center gap-2 md:gap-3 justify-self-center">
                 <button
                   onClick={() =>
                     setVelocidade((v) => Math.max(VELOCIDADE_MIN, v - VELOCIDADE_PASSO))
                   }
                   aria-label="Mais devagar"
-                  className="w-10 h-10 rounded-lg border border-noir-700 text-cream text-lg hover:border-gold-600 transition"
+                  className="w-10 h-10 md:w-16 md:h-16 rounded-lg border border-noir-700 text-cream text-lg md:text-2xl hover:border-gold-600 transition"
                 >
                   −
                 </button>
@@ -549,7 +563,7 @@ export default function Cifra() {
                 <button
                   onClick={() => setRodando((r) => !r)}
                   aria-label={rodando ? "Pausar" : "Rolar"}
-                  className="btn-gold w-14 h-14 rounded-full text-2xl"
+                  className="btn-gold w-14 h-14 md:w-20 md:h-20 rounded-2xl text-2xl md:text-4xl"
                 >
                   {rodando ? "❚❚" : "▶"}
                 </button>
@@ -559,14 +573,14 @@ export default function Cifra() {
                     setVelocidade((v) => Math.min(VELOCIDADE_MAX, v + VELOCIDADE_PASSO))
                   }
                   aria-label="Mais rápido"
-                  className="w-10 h-10 rounded-lg border border-noir-700 text-cream text-lg hover:border-gold-600 transition"
+                  className="w-10 h-10 md:w-16 md:h-16 rounded-lg border border-noir-700 text-cream text-lg md:text-2xl hover:border-gold-600 transition"
                 >
                   +
                 </button>
               </div>
 
               <div
-                className="flex items-center gap-2 justify-self-end"
+                className="flex items-center gap-2 md:gap-3 justify-self-end"
                 title={
                   resolucaoLimitada
                     ? "Nitidez reduzida neste zoom para não travar em aparelhos mais fracos"
@@ -576,14 +590,14 @@ export default function Cifra() {
                 <button
                   onClick={() => setZoom((z) => Math.max(ZOOM_MIN, +(z - 0.15).toFixed(2)))}
                   aria-label="Diminuir zoom"
-                  className="w-10 h-10 rounded-lg border border-noir-700 text-cream text-lg hover:border-gold-600 transition"
+                  className="w-10 h-10 md:w-16 md:h-16 rounded-lg border border-noir-700 text-cream text-lg md:text-2xl hover:border-gold-600 transition"
                 >
                   A−
                 </button>
                 <button
                   onClick={() => setZoom((z) => Math.min(ZOOM_MAX, +(z + 0.15).toFixed(2)))}
                   aria-label="Aumentar zoom"
-                  className="w-10 h-10 rounded-lg border border-noir-700 text-cream text-lg hover:border-gold-600 transition"
+                  className="w-10 h-10 md:w-16 md:h-16 rounded-lg border border-noir-700 text-cream text-lg md:text-2xl hover:border-gold-600 transition"
                 >
                   A+
                 </button>
@@ -592,18 +606,31 @@ export default function Cifra() {
           )}
         </div>
 
-        <div className="gold-rule my-3" />
+        <div className="gold-rule my-3 md:my-4" />
 
-        <div className="min-w-0 text-center px-1 truncate">
-          <span className="font-display text-gold-300 text-base tracking-wide">
-            {musica?.nome}
-          </span>
-          {musica?.artista && (
-            <>
-              <span className="text-cream-muted mx-2">—</span>
-              <span className="text-cream-muted italic text-base">{musica.artista}</span>
-            </>
-          )}
+        <div className="flex items-center justify-center gap-2 px-1">
+          <button
+            onClick={alternarFavorito}
+            aria-label={musica?.favorito ? "Remover dos favoritos" : "Marcar como favorita"}
+            className={`shrink-0 text-xl md:text-2xl leading-none transition ${
+              musica?.favorito ? "text-gold-400" : "text-noir-600 hover:text-gold-300"
+            }`}
+          >
+            {musica?.favorito ? "★" : "☆"}
+          </button>
+          <div className="min-w-0 truncate">
+            <span className="font-display text-gold-300 text-base md:text-xl tracking-wide">
+              {musica?.nome}
+            </span>
+            {musica?.artista && (
+              <>
+                <span className="text-cream-muted mx-2">—</span>
+                <span className="text-cream-muted italic text-base md:text-xl">
+                  {musica.artista}
+                </span>
+              </>
+            )}
+          </div>
         </div>
       </header>
 

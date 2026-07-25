@@ -12,6 +12,9 @@ create table if not exists public.musicas (
   created_at timestamptz not null default now()
 );
 
+-- Favorita (estrela) na tela de cifra — usada pra filtrar na aba Cifras
+alter table public.musicas add column if not exists favorito boolean not null default false;
+
 alter table public.musicas enable row level security;
 
 -- Qualquer visitante pode LER o repertório

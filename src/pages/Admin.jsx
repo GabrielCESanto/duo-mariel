@@ -202,6 +202,23 @@ function Painel() {
   const [pendentes, setPendentes] = useState(0);
   const [pedidoNovo, setPedidoNovo] = useState(null);
   const [menuOutrosAberto, setMenuOutrosAberto] = useState(false);
+  const [cifraPorNome, setCifraPorNome] = useState({});
+  const navigate = useNavigate();
+
+  // Mapa nome→cifra, pro botão "Ver cifra" no pop-up de pedido novo (fica
+  // disponível em qualquer aba, não só na de Pedidos)
+  useEffect(() => {
+    supabase
+      .from("musicas")
+      .select("id, nome")
+      .not("cifra_path", "is", null)
+      .then(({ data, error }) => {
+        if (error) return;
+        const mapa = {};
+        for (const m of data ?? []) mapa[normalizarNome(m.nome)] = m.id;
+        setCifraPorNome(mapa);
+      });
+  }, []);
 
   const abasOutros = (GOATCOUNTER_CODE ? [...ABAS_OUTROS, ["acessos", "Acessos"]] : ABAS_OUTROS)
     .slice()
@@ -256,10 +273,15 @@ function Painel() {
       {pedidoNovo && (
         <NovoPedidoPopup
           pedido={pedidoNovo}
+          cifraId={cifraPorNome[normalizarNome(nomeDoPedido(pedidoNovo.pedido))]}
           onFechar={() => setPedidoNovo(null)}
           onVerPedidos={() => {
             setPedidoNovo(null);
             setAba("pedidos");
+          }}
+          onVerCifra={(id) => {
+            setPedidoNovo(null);
+            navigate(`/cifra/${id}`);
           }}
         />
       )}
@@ -321,7 +343,7 @@ function Painel() {
 }
 
 // Aviso no centro da tela quando um pedido novo chega (via Realtime)
-function NovoPedidoPopup({ pedido, onFechar, onVerPedidos }) {
+function NovoPedidoPopup({ pedido, cifraId, onFechar, onVerPedidos, onVerCifra }) {
   useEffect(() => {
     // some sozinho depois de um tempo, se ninguém interagir
     const timer = setTimeout(onFechar, 15_000);
@@ -353,13 +375,21 @@ function NovoPedidoPopup({ pedido, onFechar, onVerPedidos }) {
           <p className="text-cream-muted mt-2 break-words">💬 {pedido.mensagem}</p>
         )}
 
-        <div className="mt-5 flex gap-3 justify-center">
+        <div className="mt-5 flex gap-3 justify-center flex-wrap">
           <button
             onClick={onFechar}
             className="px-4 py-2 rounded-xl bg-noir-800 border border-noir-700 hover:bg-noir-700 text-sm transition"
           >
             Fechar
           </button>
+          {cifraId && (
+            <button
+              onClick={() => onVerCifra(cifraId)}
+              className="px-4 py-2 rounded-xl border border-gold-600 text-gold-300 hover:bg-noir-800 text-sm transition"
+            >
+              🎼 Ver cifra
+            </button>
+          )}
           <button onClick={onVerPedidos} className="btn-gold px-5 py-2 rounded-xl text-sm">
             Ver pedidos
           </button>
@@ -962,6 +992,7 @@ function AbaCifras() {
   const [modalAberto, setModalAberto] = useState(false);
   const [armazenamentoPersistente, setArmazenamentoPersistente] = useState(null); // null = verificando
   const [reprocessando, setReprocessando] = useState(null); // { atual, total, nome } ou null
+  const [soFavoritas, setSoFavoritas] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -981,7 +1012,7 @@ function AbaCifras() {
   const carregar = () =>
     supabase
       .from("musicas")
-      .select("id, nome, artista, estilo, cifra_path, cifra_paginas, cifra_versao")
+      .select("id, nome, artista, estilo, cifra_path, cifra_paginas, cifra_versao, favorito")
       .not("cifra_path", "is", null)
       .order("nome")
       .order("artista")
@@ -1003,6 +1034,7 @@ function AbaCifras() {
   useEffect(() => assinarDownloadCifras(setProgresso), []);
 
   const visiveis = musicas.filter((m) => {
+    if (soFavoritas && !m.favorito) return false;
     const q = filtro.trim().toLowerCase();
     if (!q) return true;
     return `${m.nome} ${m.artista} ${m.estilo ?? ""}`.toLowerCase().includes(q);
@@ -1081,30 +1113,38 @@ function AbaCifras() {
           </button>
         </div>
       </div>
-      <div className="mb-3">
-        <p className="text-xs text-cream-muted">
-          Dica: abra as cifras do show com internet — elas ficam salvas offline.
+      {armazenamentoPersistente === false && (
+        <p className="text-xs text-amber-400/80 mb-3">
+          ⚠️ Este navegador (comum no iPhone/Safari) não garante manter esse
+          cache pra sempre — ele pode ser apagado sozinho depois de uns 7
+          dias sem abrir o site. Abra o app com internet regularmente, e
+          sempre antes de um show.
         </p>
-        {armazenamentoPersistente === false && (
-          <p className="text-xs text-amber-400/80 mt-1">
-            ⚠️ Este navegador (comum no iPhone/Safari) não garante manter esse
-            cache pra sempre — ele pode ser apagado sozinho depois de uns 7
-            dias sem abrir o site. Abra o app com internet regularmente, e
-            sempre antes de um show.
-          </p>
-        )}
-      </div>
+      )}
 
       {modalAberto && (
         <ModalDownloadCifras progresso={progresso} onFechar={() => setModalAberto(false)} />
       )}
 
-      <input
-        className="input-noir mb-2"
-        placeholder="Buscar cifra..."
-        value={filtro}
-        onChange={(e) => setFiltro(e.target.value)}
-      />
+      <div className="flex gap-2 mb-2">
+        <input
+          className="input-noir"
+          placeholder="Buscar cifra..."
+          value={filtro}
+          onChange={(e) => setFiltro(e.target.value)}
+        />
+        <button
+          onClick={() => setSoFavoritas((v) => !v)}
+          title="Mostrar só as cifras marcadas como favoritas"
+          className={`shrink-0 px-3 rounded-lg border text-lg transition ${
+            soFavoritas
+              ? "btn-gold border-transparent"
+              : "border-noir-700 text-cream-muted hover:text-gold-300"
+          }`}
+        >
+          {soFavoritas ? "★" : "☆"}
+        </button>
+      </div>
 
       {carregando ? (
         <p className="text-cream-muted text-sm py-4">Carregando...</p>
