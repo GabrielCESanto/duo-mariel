@@ -510,19 +510,19 @@ export default function Cifra() {
     <div className={`${ALTURA_TELA_CLASSE} flex flex-col`}>
       {/* Barra superior — controles numa linha, título/artista embaixo */}
       <header className="border-b border-noir-800 bg-noir-900/90 shrink-0 px-3 py-3">
-        <div className="flex items-center justify-center gap-3 flex-wrap">
-          <Link
-            to="/admin?aba=cifras"
-            className="shrink-0 h-14 px-4 flex items-center rounded-xl border border-noir-700 text-cream-muted text-base font-medium hover:text-gold-300 hover:border-gold-600 transition"
-          >
-            ‹ Voltar
-          </Link>
+        <div className="grid grid-cols-3 items-center gap-2">
+          <div className="justify-self-start">
+            <Link
+              to="/admin?aba=cifras"
+              className="shrink-0 h-14 px-4 flex items-center rounded-xl border border-noir-700 text-cream-muted text-base font-medium hover:text-gold-300 hover:border-gold-600 transition"
+            >
+              ‹ Voltar
+            </Link>
+          </div>
 
           {!erro && (
             <>
-              <div className="w-px h-10 bg-noir-700 shrink-0" />
-
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-2 justify-self-center">
                 <button
                   onClick={() =>
                     setVelocidade((v) => Math.max(VELOCIDADE_MIN, v - VELOCIDADE_PASSO))
@@ -552,41 +552,28 @@ export default function Cifra() {
                 </button>
               </div>
 
-              <div className="w-px h-10 bg-noir-700 shrink-0" />
-
-              <div className="flex flex-col gap-1 shrink-0">
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setZoom((z) => Math.min(ZOOM_MAX, +(z + 0.15).toFixed(2)))}
-                    aria-label="Aumentar zoom"
-                    className="w-9 h-7 rounded-md border border-noir-700 text-cream-muted text-xs hover:text-gold-300 transition"
-                  >
-                    A+
-                  </button>
-                  <span className="text-cream-muted text-[10px] tabular-nums">
-                    {Math.round(zoom * 100)}%
-                  </span>
-                  {resolucaoLimitada && (
-                    <span
-                      title="Nitidez reduzida neste zoom para não travar em aparelhos mais fracos"
-                      className="text-[10px] text-amber-400/80"
-                    >
-                      ◐
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setZoom((z) => Math.max(ZOOM_MIN, +(z - 0.15).toFixed(2)))}
-                    aria-label="Diminuir zoom"
-                    className="w-9 h-7 rounded-md border border-noir-700 text-cream-muted text-xs hover:text-gold-300 transition"
-                  >
-                    A−
-                  </button>
-                  <span className="text-cream-muted text-[10px] tabular-nums">
-                    {velocidade} px/s
-                  </span>
-                </div>
+              <div
+                className="flex flex-col gap-1 justify-self-end"
+                title={
+                  resolucaoLimitada
+                    ? "Nitidez reduzida neste zoom para não travar em aparelhos mais fracos"
+                    : undefined
+                }
+              >
+                <button
+                  onClick={() => setZoom((z) => Math.min(ZOOM_MAX, +(z + 0.15).toFixed(2)))}
+                  aria-label="Aumentar zoom"
+                  className="w-14 h-7 rounded-md border border-noir-700 text-cream-muted text-xs hover:text-gold-300 transition"
+                >
+                  A+
+                </button>
+                <button
+                  onClick={() => setZoom((z) => Math.max(ZOOM_MIN, +(z - 0.15).toFixed(2)))}
+                  aria-label="Diminuir zoom"
+                  className="w-14 h-7 rounded-md border border-noir-700 text-cream-muted text-xs hover:text-gold-300 transition"
+                >
+                  A−
+                </button>
               </div>
             </>
           )}
