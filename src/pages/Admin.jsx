@@ -13,6 +13,23 @@ import { buscarMusicasApi, existeNoItunes } from "../lib/preview";
 
 const BASE = import.meta.env.BASE_URL;
 
+// Sobe uma imagem de página de cifra. Se já existir um arquivo nesse
+// caminho (de uma tentativa anterior que parou no meio), remove e tenta de
+// novo — usar upsert:true em vez disso esbarrava numa política de RLS do
+// Storage ("new row violates row-level security policy"). Só remove
+// quando o upload direto falhar por já existir, pra não apagar um arquivo
+// bom antes de confirmar que o novo upload vai dar certo.
+const subirImagemPagina = async (path, blob) => {
+  const resultado = await supabase.storage
+    .from("cifras")
+    .upload(path, blob, { contentType: "image/jpeg" });
+  if (resultado.error?.message?.includes("already exists")) {
+    await supabase.storage.from("cifras").remove([path]);
+    return supabase.storage.from("cifras").upload(path, blob, { contentType: "image/jpeg" });
+  }
+  return resultado;
+};
+
 // Compara nomes de músicas ignorando acentos, caixa e pontuação
 const normalizarNome = (s) =>
   String(s ?? "")
@@ -558,15 +575,7 @@ function GerenciarMusicas() {
         setStatus(`⏳ Preparando página ${atual}/${total}...`);
       });
       for (let i = 0; i < imagens.length; i++) {
-        const { error: imgError } = await supabase.storage
-          .from("cifras")
-          // upsert: uma tentativa anterior pode ter subido essa mesma
-          // página antes de falhar numa página seguinte — sem isso, tentar
-          // de novo trava com "The resource already exists"
-          .upload(`${prefixo}-p${i + 1}.jpg`, imagens[i], {
-            contentType: "image/jpeg",
-            upsert: true,
-          });
+        const { error: imgError } = await subirImagemPagina(`${prefixo}-p${i + 1}.jpg`, imagens[i]);
         if (imgError) throw imgError;
       }
       totalPaginas = imagens.length;
@@ -993,18 +1002,15 @@ function AbaCifras() {
     for (const [i, m] of semImagens.entries()) {
       setReprocessando({ atual: i + 1, total: semImagens.length, nome: m.nome });
       try {
+        // Um lote longo pode passar do tempo de vida do token de sessão —
+        // isso reconecta se estiver perto de expirar, evitando falhas de
+        // RLS no meio do reprocessamento
+        await supabase.auth.getSession();
         const prefixo = m.cifra_path.replace(/\.pdf$/, "");
         const { data: pub } = supabase.storage.from("cifras").getPublicUrl(m.cifra_path);
         const imagens = await pdfParaImagensJpeg(pub.publicUrl);
         for (let p = 0; p < imagens.length; p++) {
-          const { error } = await supabase.storage
-            .from("cifras")
-            // upsert: uma tentativa anterior desse mesmo reprocessamento
-            // pode ter subido essa página antes de falhar numa seguinte
-            .upload(`${prefixo}-p${p + 1}.jpg`, imagens[p], {
-              contentType: "image/jpeg",
-              upsert: true,
-            });
+          const { error } = await subirImagemPagina(`${prefixo}-p${p + 1}.jpg`, imagens[p]);
           if (error) throw error;
         }
         await supabase.from("musicas").update({ cifra_paginas: imagens.length }).eq("id", m.id);
