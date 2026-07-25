@@ -59,9 +59,12 @@ export default function Cifra() {
   // cada zoom eventualmente corrompia (tela verde/branca) ou travava sem
   // nem lançar uma exceção (a promise do render simplesmente não resolvia
   // nunca), o que nenhum try/catch conseguia evitar.
-  const [zoom, setZoom] = useState(2); // abre em 200%
+  const [zoom, setZoom] = useState(1.8); // abre em 180%
   const [renderizando, setRenderizando] = useState(true);
   const [resolucaoLimitada, setResolucaoLimitada] = useState(false);
+  // Mostra "(180% • 20px/s)" ao lado do título por 5s sempre que o usuário
+  // mexe no zoom ou na velocidade, depois some sozinho
+  const [mostrarInfoRapida, setMostrarInfoRapida] = useState(false);
   const [progresso, setProgresso] = useState({ atual: 0, total: 0 }); // pra "Renderizando página X de Y"
 
   const scrollRef = useRef(null);
@@ -381,6 +384,13 @@ export default function Cifra() {
     return () => clearTimeout(timer);
   }, [zoom]);
 
+  // --- Mostra o "(180% • 20px/s)" por 5s ao mexer no zoom ou na velocidade ---
+  useEffect(() => {
+    setMostrarInfoRapida(true);
+    const timer = setTimeout(() => setMostrarInfoRapida(false), 5000);
+    return () => clearTimeout(timer);
+  }, [zoom, velocidade]);
+
   // --- Loop da rolagem automática ---
   useEffect(() => {
     let rafId;
@@ -563,7 +573,7 @@ export default function Cifra() {
                 <button
                   onClick={() => setRodando((r) => !r)}
                   aria-label={rodando ? "Pausar" : "Rolar"}
-                  className="btn-gold w-16 h-16 md:w-28 md:h-28 rounded-2xl text-3xl md:text-5xl"
+                  className="btn-gold w-24 h-16 md:w-40 md:h-28 rounded-2xl text-3xl md:text-5xl"
                 >
                   {rodando ? "❚❚" : "▶"}
                 </button>
@@ -622,6 +632,11 @@ export default function Cifra() {
             <span className="font-display text-gold-300 text-base md:text-xl tracking-wide">
               {musica?.nome}
             </span>
+            {mostrarInfoRapida && (
+              <span className="text-cream-muted/50 text-xs md:text-sm ml-1.5 transition-opacity">
+                ({Math.round(zoom * 100)}% • {velocidade}px/s)
+              </span>
+            )}
             {musica?.artista && (
               <>
                 <span className="text-cream-muted mx-2">—</span>

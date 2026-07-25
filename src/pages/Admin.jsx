@@ -205,7 +205,7 @@ const ABAS_OUTROS = [
   ["afinador", "Afinador"],
   ["agenda", "Agenda"],
   ["aprender", "Aprender"],
-  ["musicas", "Músicas"],
+  ["musicas", "Adicionar Músicas"],
   ["videos", "Vídeos"],
 ];
 
@@ -2261,7 +2261,8 @@ function GerenciarPedidos({ onMudanca }) {
   const [contagens, setContagens] = useState({ pendentes: 0, atendidos: 0, arquivados: 0 });
   const [cifraPorNome, setCifraPorNome] = useState({});
   const [pedidoAberto, setPedidoAberto] = useState(null);
-  const [filtroDe, setFiltroDe] = useState("");
+  const [filtroDia, setFiltroDia] = useState(""); // Atendidos: um dia só
+  const [filtroDe, setFiltroDe] = useState(""); // Arquivados: período
   const [filtroAte, setFiltroAte] = useState("");
   const navigate = useNavigate();
 
@@ -2316,16 +2317,25 @@ function GerenciarPedidos({ onMudanca }) {
   }, [mostrar]);
 
   // Filtro de data (só relevante pra Atendidos/Arquivados — Pendentes é a
-  // fila de trabalho, não faz sentido recortar por período)
-  const pedidosFiltrados =
-    mostrar === "pendentes"
-      ? pedidos
-      : pedidos.filter((p) => {
-          const dataPedido = new Date(p.created_at);
-          if (filtroDe && dataPedido < new Date(`${filtroDe}T00:00:00`)) return false;
-          if (filtroAte && dataPedido > new Date(`${filtroAte}T23:59:59`)) return false;
-          return true;
-        });
+  // fila de trabalho, não faz sentido recortar por período). Atendidos usa
+  // um único dia (lista mais curta, recente); Arquivados usa um período
+  // (De/até), já que pode acumular muito tempo.
+  const pedidosFiltrados = pedidos.filter((p) => {
+    const dataPedido = new Date(p.created_at);
+    if (mostrar === "atendidos") {
+      if (filtroDia) {
+        if (dataPedido < new Date(`${filtroDia}T00:00:00`)) return false;
+        if (dataPedido > new Date(`${filtroDia}T23:59:59`)) return false;
+      }
+      return true;
+    }
+    if (mostrar === "arquivados") {
+      if (filtroDe && dataPedido < new Date(`${filtroDe}T00:00:00`)) return false;
+      if (filtroAte && dataPedido > new Date(`${filtroAte}T23:59:59`)) return false;
+      return true;
+    }
+    return true; // pendentes: sem filtro de data
+  });
 
   useEffect(() => {
     // Mapa nome→cifra, para o botão "Ver cifra" no detalhe do pedido
@@ -2425,20 +2435,41 @@ function GerenciarPedidos({ onMudanca }) {
         </button>
       </div>
 
-      {/* Filtro de data — só faz sentido pra histórico (Atendidos/Arquivados) */}
-      {mostrar !== "pendentes" && (
-        <div className="flex items-center gap-2 mb-3 flex-wrap">
-          <label className="text-xs text-cream-muted">De</label>
+      {/* Filtro de data — Atendidos é um dia só (lista recente e curta);
+          Arquivados é um período (De/até), já que acumula mais tempo */}
+      {mostrar === "atendidos" && (
+        <div className="flex items-center gap-2 mb-3 flex-nowrap">
+          <label className="text-xs text-cream-muted shrink-0">Dia</label>
           <input
             type="date"
             className="input-noir w-auto text-sm py-1.5"
+            value={filtroDia}
+            onChange={(e) => setFiltroDia(e.target.value)}
+          />
+          {filtroDia && (
+            <button
+              onClick={() => setFiltroDia("")}
+              className="text-xs text-cream-muted hover:text-gold-300 transition shrink-0"
+            >
+              ✕ Limpar
+            </button>
+          )}
+        </div>
+      )}
+
+      {mostrar === "arquivados" && (
+        <div className="flex items-center gap-2 mb-3 flex-nowrap overflow-x-auto">
+          <label className="text-xs text-cream-muted shrink-0">De</label>
+          <input
+            type="date"
+            className="input-noir w-auto text-sm py-1.5 shrink-0"
             value={filtroDe}
             onChange={(e) => setFiltroDe(e.target.value)}
           />
-          <label className="text-xs text-cream-muted">até</label>
+          <label className="text-xs text-cream-muted shrink-0">até</label>
           <input
             type="date"
-            className="input-noir w-auto text-sm py-1.5"
+            className="input-noir w-auto text-sm py-1.5 shrink-0"
             value={filtroAte}
             onChange={(e) => setFiltroAte(e.target.value)}
           />
@@ -2448,7 +2479,7 @@ function GerenciarPedidos({ onMudanca }) {
                 setFiltroDe("");
                 setFiltroAte("");
               }}
-              className="text-xs text-cream-muted hover:text-gold-300 transition"
+              className="text-xs text-cream-muted hover:text-gold-300 transition shrink-0"
             >
               ✕ Limpar
             </button>
