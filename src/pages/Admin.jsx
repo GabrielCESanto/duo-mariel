@@ -1311,6 +1311,7 @@ function GerenciarSugestoes() {
   const [status, setStatus] = useState("");
   const [filtroPara, setFiltroPara] = useState(() => new Set(OPCOES_PARA));
   const [repertorio, setRepertorio] = useState(() => new Set());
+  const [sugestaoParaMover, setSugestaoParaMover] = useState(null);
 
   // Autocomplete via iTunes (digitar manualmente sempre funciona)
   const [sugestoesApi, setSugestoesApi] = useState([]);
@@ -1394,27 +1395,24 @@ function GerenciarSugestoes() {
     carregar();
   };
 
-  const moverParaRepertorio = async (s) => {
-    let artista = s.artista;
-    if (!artista) {
-      artista = window.prompt(`Artista de "${s.musica}"?`);
-      if (!artista || !artista.trim()) return;
-      artista = artista.trim();
-    }
-    const estilo = window.prompt("Estilo (opcional, ex.: MPB):") || null;
+  // Abre o modal de vínculo com o iTunes — a música só entra de fato no
+  // repertório quando o modal é confirmado (confirmarMoverRepertorio)
+  const moverParaRepertorio = (s) => setSugestaoParaMover(s);
 
+  const confirmarMoverRepertorio = async ({ nome, artista, estilo }) => {
     const { error } = await supabase
       .from("musicas")
-      .insert({ nome: s.musica, artista, estilo: estilo?.trim() || null });
+      .insert({ nome, artista, estilo: estilo || null });
 
     if (error) {
       console.error(error);
       setStatus("❌ Erro ao mover para o repertório.");
       return;
     }
-    await supabase.from("sugestoes").delete().eq("id", s.id);
-    setStatus(`✅ "${s.musica}" agora está no repertório!`);
+    await supabase.from("sugestoes").delete().eq("id", sugestaoParaMover.id);
+    setStatus(`✅ "${nome}" agora está no repertório!`);
     setTimeout(() => setStatus(""), 3000);
+    setSugestaoParaMover(null);
     carregar();
   };
 
@@ -1433,7 +1431,8 @@ function GerenciarSugestoes() {
     }
     const outro = campo === "ok_gabs" ? "ok_mari" : "ok_gabs";
     if (novoValor && s[outro]) {
-      await moverParaRepertorio(s);
+      carregar();
+      moverParaRepertorio({ ...s, [campo]: novoValor });
       return;
     }
     carregar();
@@ -1627,6 +1626,156 @@ function GerenciarSugestoes() {
             )}
           </ul>
         )}
+      </div>
+
+      {sugestaoParaMover && (
+        <ModalMoverRepertorio
+          sugestao={sugestaoParaMover}
+          onFechar={() => setSugestaoParaMover(null)}
+          onConfirmar={confirmarMoverRepertorio}
+        />
+      )}
+    </div>
+  );
+}
+
+// Confirma o vínculo antes de mover uma sugestão pro repertório: busca no
+// iTunes pra preencher artista/estilo/capa automaticamente, com entrada
+// manual como alternativa caso não encontre a música
+function ModalMoverRepertorio({ sugestao, onFechar, onConfirmar }) {
+  const [nome, setNome] = useState(sugestao.musica);
+  const [artista, setArtista] = useState(sugestao.artista || "");
+  const [estilo, setEstilo] = useState("");
+  const [salvando, setSalvando] = useState(false);
+
+  const [sugestoesApi, setSugestoesApi] = useState([]);
+  const [buscandoApi, setBuscandoApi] = useState(false);
+  const escolhaRef = useState({ atual: "" })[0];
+  const buscaApiRef = useRef(0);
+
+  useEffect(() => {
+    const q = nome.trim();
+    if (q.length < 3 || q === escolhaRef.atual) {
+      setSugestoesApi([]);
+      setBuscandoApi(false);
+      return;
+    }
+    setBuscandoApi(true);
+    const minhaBusca = ++buscaApiRef.current;
+    const timer = setTimeout(async () => {
+      const resultados = await buscarMusicasApi(q);
+      if (buscaApiRef.current !== minhaBusca) return;
+      setSugestoesApi(resultados);
+      setBuscandoApi(false);
+    }, 450);
+    return () => clearTimeout(timer);
+  }, [nome, escolhaRef]);
+
+  const usarSugestao = (s) => {
+    escolhaRef.atual = s.nome;
+    setNome(s.nome);
+    setArtista(s.artista);
+    setEstilo(s.estilo || "");
+    setSugestoesApi([]);
+  };
+
+  const confirmar = async () => {
+    if (!nome.trim() || !artista.trim()) return;
+    setSalvando(true);
+    await onConfirmar({ nome: nome.trim(), artista: artista.trim(), estilo: estilo.trim() });
+    setSalvando(false);
+  };
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+      onClick={onFechar}
+    >
+      <div
+        className="w-full max-w-md rounded-2xl border border-noir-700 bg-noir-900 p-6"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="section-title text-base mb-1">Adicionar ao repertório</h3>
+        <p className="text-cream-muted text-xs mb-4">
+          Busque no iTunes pra preencher automático, ou digite manualmente.
+        </p>
+
+        <div className="grid gap-3">
+          <input
+            className="input-noir"
+            placeholder="Nome da música *"
+            value={nome}
+            onChange={(e) => setNome(e.target.value)}
+          />
+          <input
+            className="input-noir"
+            placeholder="Artista *"
+            value={artista}
+            onChange={(e) => setArtista(e.target.value)}
+          />
+          <input
+            className="input-noir"
+            placeholder="Estilo (ex.: MPB)"
+            value={estilo}
+            onChange={(e) => setEstilo(e.target.value)}
+          />
+        </div>
+
+        {(buscandoApi || sugestoesApi.length > 0) && (
+          <div className="mt-3 border border-noir-700 rounded-xl bg-noir-900 overflow-hidden">
+            {buscandoApi ? (
+              <p className="px-4 py-3 text-xs text-cream-muted">Buscando sugestões...</p>
+            ) : (
+              <ul className="divide-y divide-noir-800 max-h-56 overflow-y-auto">
+                {sugestoesApi.map((s, i) => (
+                  <li key={i} className="flex items-center pr-3">
+                    <button
+                      type="button"
+                      onClick={() => usarSugestao(s)}
+                      className="flex-1 min-w-0 px-4 py-2.5 flex items-center gap-3 text-left hover:bg-noir-800 transition"
+                    >
+                      {s.capa ? (
+                        <img
+                          src={s.capa}
+                          alt=""
+                          className="w-9 h-9 rounded-lg border border-noir-700 shrink-0"
+                        />
+                      ) : (
+                        <span className="w-9 h-9 rounded-lg border border-noir-700 shrink-0 flex items-center justify-center text-cream-muted">
+                          ♪
+                        </span>
+                      )}
+                      <span className="min-w-0">
+                        <span className="block text-sm text-cream truncate">{s.nome}</span>
+                        <span className="block text-xs text-cream-muted truncate">
+                          {s.artista}
+                          {s.estilo ? ` • ${s.estilo}` : ""}
+                        </span>
+                      </span>
+                    </button>
+                    <BotaoOuvir url={s.previewUrl} />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+
+        <div className="mt-5 flex items-center justify-end gap-3">
+          <button
+            onClick={onFechar}
+            className="px-4 py-2 rounded-xl border border-noir-700 text-sm text-cream-muted hover:text-cream transition"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={confirmar}
+            disabled={salvando || !nome.trim() || !artista.trim()}
+            className="btn-gold px-5 py-2 rounded-xl text-sm disabled:opacity-50"
+          >
+            {salvando ? "Salvando..." : "Adicionar ao repertório"}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -2442,7 +2591,7 @@ function GerenciarPedidos({ onMudanca }) {
           <label className="text-xs text-cream-muted shrink-0">Dia</label>
           <input
             type="date"
-            className="input-noir w-auto text-sm py-1.5"
+            className="input-noir w-[12ch] text-sm py-1.5"
             value={filtroDia}
             onChange={(e) => setFiltroDia(e.target.value)}
           />
@@ -2462,14 +2611,14 @@ function GerenciarPedidos({ onMudanca }) {
           <label className="text-xs text-cream-muted shrink-0">De</label>
           <input
             type="date"
-            className="input-noir w-auto text-sm py-1.5 shrink-0"
+            className="input-noir w-[12ch] text-sm py-1.5 shrink-0"
             value={filtroDe}
             onChange={(e) => setFiltroDe(e.target.value)}
           />
           <label className="text-xs text-cream-muted shrink-0">até</label>
           <input
             type="date"
-            className="input-noir w-auto text-sm py-1.5 shrink-0"
+            className="input-noir w-[12ch] text-sm py-1.5 shrink-0"
             value={filtroAte}
             onChange={(e) => setFiltroAte(e.target.value)}
           />

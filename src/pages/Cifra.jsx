@@ -51,7 +51,7 @@ export default function Cifra() {
   const [erro, setErro] = useState("");
   const [tentativa, setTentativa] = useState(0); // botão "Tentar de novo" incrementa isso
   const [rodando, setRodando] = useState(false);
-  const [velocidade, setVelocidade] = useState(20);
+  const [velocidade, setVelocidade] = useState(15);
   // Cada página do PDF é renderizada em canvas UMA ÚNICA VEZ (na abertura),
   // convertida pra <img> e o canvas é descartado imediatamente. Zoom nunca
   // mais recria canvas — é só CSS (width) por cima das imagens já prontas.
@@ -62,7 +62,7 @@ export default function Cifra() {
   const [zoom, setZoom] = useState(1.8); // abre em 180%
   const [renderizando, setRenderizando] = useState(true);
   const [resolucaoLimitada, setResolucaoLimitada] = useState(false);
-  // Mostra "(180% • 20px/s)" ao lado do título por 5s sempre que o usuário
+  // Mostra "(180% • 15px/s)" ao lado do título por 5s sempre que o usuário
   // mexe no zoom ou na velocidade, depois some sozinho
   const [mostrarInfoRapida, setMostrarInfoRapida] = useState(false);
   const [progresso, setProgresso] = useState({ atual: 0, total: 0 }); // pra "Renderizando página X de Y"
@@ -618,7 +618,7 @@ export default function Cifra() {
 
         <div className="gold-rule my-3 md:my-4" />
 
-        <div className="flex items-center justify-center gap-2 px-1">
+        <div className="flex items-center gap-2 px-1">
           <button
             onClick={alternarFavorito}
             aria-label={musica?.favorito ? "Remover dos favoritos" : "Marcar como favorita"}
@@ -628,15 +628,10 @@ export default function Cifra() {
           >
             {musica?.favorito ? "★" : "☆"}
           </button>
-          <div className="min-w-0 truncate">
+          <div className="min-w-0 flex-1 truncate">
             <span className="font-display text-gold-300 text-base md:text-xl tracking-wide">
               {musica?.nome}
             </span>
-            {mostrarInfoRapida && (
-              <span className="text-cream-muted/50 text-xs md:text-sm ml-1.5 transition-opacity">
-                ({Math.round(zoom * 100)}% • {velocidade}px/s)
-              </span>
-            )}
             {musica?.artista && (
               <>
                 <span className="text-cream-muted mx-2">—</span>
@@ -646,6 +641,11 @@ export default function Cifra() {
               </>
             )}
           </div>
+          {mostrarInfoRapida && (
+            <span className="shrink-0 text-cream-muted/50 text-xs md:text-sm transition-opacity">
+              ({Math.round(zoom * 100)}% • {velocidade}px/s)
+            </span>
+          )}
         </div>
       </header>
 
