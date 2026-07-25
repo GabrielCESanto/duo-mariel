@@ -260,7 +260,17 @@ export default function Cifra() {
   // suporte de partitura muda de retrato pra paisagem no meio do show) ---
   useEffect(() => {
     let timer;
+    let largura = window.innerWidth;
     const aoRedimensionar = () => {
+      // No celular, rolar a página mostra/esconde a barra de endereço do
+      // navegador — isso dispara "resize" (só de ALTURA) sem o usuário ter
+      // girado nada. Sem essa checagem de largura, cada rolagem disparava
+      // uma re-renderização completa do PDF, travando o app num loop de
+      // renders que nunca terminam.
+      const novaLargura = window.innerWidth;
+      if (Math.abs(novaLargura - largura) < 10) return;
+      largura = novaLargura;
+
       clearTimeout(timer);
       timer = setTimeout(() => {
         if (docRef.current) renderizar(docRef.current, zoomRef.current);
