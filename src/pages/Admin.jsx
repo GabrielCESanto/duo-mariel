@@ -9,7 +9,7 @@ import {
 } from "../lib/cifraCache";
 import Afinador from "../components/Afinador";
 import { GOATCOUNTER_CODE } from "../config";
-import { buscarMusicasApi, existeNoItunes } from "../lib/preview";
+import { buscarMusicasApi, existeNoItunes, buscarPreview } from "../lib/preview";
 
 const BASE = import.meta.env.BASE_URL;
 
@@ -317,6 +317,48 @@ function Icone({ nome, className = "w-5 h-5" }) {
           <circle cx="12" cy="12" r="3" />
         </svg>
       );
+    case "anexo":
+      return (
+        <svg {...props}>
+          <path d="M17 8.5l-7.5 7.5a3 3 0 004.24 4.24l8-8a5 5 0 00-7.07-7.07l-8 8a7 7 0 009.9 9.9" />
+        </svg>
+      );
+    case "reprocessar":
+      return (
+        <svg {...props}>
+          <path d="M4 12a8 8 0 0114-5.3M20 4v5h-5" />
+          <path d="M20 12a8 8 0 01-14 5.3M4 20v-5h5" />
+        </svg>
+      );
+    case "buscar":
+      return (
+        <svg {...props}>
+          <circle cx="11" cy="11" r="7" />
+          <line x1="21" y1="21" x2="16.5" y2="16.5" />
+        </svg>
+      );
+    case "arquivo":
+      return (
+        <svg {...props}>
+          <rect x="3" y="4" width="18" height="5" rx="1" />
+          <path d="M5 9v9a2 2 0 002 2h10a2 2 0 002-2V9" />
+          <line x1="10" y1="13" x2="14" y2="13" />
+        </svg>
+      );
+    case "aparelho":
+      return (
+        <svg {...props}>
+          <rect x="7" y="2" width="10" height="20" rx="2" />
+          <line x1="11" y1="18" x2="13" y2="18" />
+        </svg>
+      );
+    case "camera":
+      return (
+        <svg {...props}>
+          <path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 011 1v10a1 1 0 01-1 1H4a1 1 0 01-1-1V9a1 1 0 011-1z" />
+          <circle cx="12" cy="13" r="3.5" />
+        </svg>
+      );
     default:
       return null;
   }
@@ -531,9 +573,10 @@ function NovoPedidoPopup({ pedido, cifraId, onFechar, onVerPedidos, onVerCifra }
           {cifraId && (
             <button
               onClick={() => onVerCifra(cifraId)}
-              className="px-4 py-2 rounded-xl border border-gold-600 text-gold-300 hover:bg-noir-800 text-sm transition"
+              className="px-4 py-2 rounded-xl border border-gold-600 text-gold-300 hover:bg-noir-800 text-sm transition inline-flex items-center gap-1.5"
             >
-              🎼 Ver cifra
+              <Icone nome="cifras" className="w-4 h-4" />
+              Ver cifra
             </button>
           )}
           <button onClick={onVerPedidos} className="btn-gold px-5 py-2 rounded-xl text-sm">
@@ -992,9 +1035,16 @@ function GerenciarMusicas() {
             onClick={verificarItunes}
             disabled={!!verificandoItunes || carregando}
             title="Consulta cada música na busca do iTunes (roda uma vez e fica salvo)"
-            className="px-3 py-1.5 rounded-full text-xs tracking-wide transition border border-noir-700 text-cream-muted hover:text-gold-300 hover:border-gold-600 disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs tracking-wide transition border border-noir-700 text-cream-muted hover:text-gold-300 hover:border-gold-600 disabled:opacity-50"
           >
-            {verificandoItunes ? `⏳ ${verificandoItunes}` : "🔎 Verificar iTunes"}
+            {verificandoItunes ? (
+              `⏳ ${verificandoItunes}`
+            ) : (
+              <>
+                <Icone nome="buscar" className="w-3.5 h-3.5" />
+                Verificar iTunes
+              </>
+            )}
           </button>
         </div>
 
@@ -1004,7 +1054,8 @@ function GerenciarMusicas() {
           <ul className="divide-y divide-noir-800 max-h-[480px] overflow-y-auto pr-2">
             {visiveis.map((m) => (
               <li key={m.id} className="py-3 flex items-center justify-between gap-3">
-                <div className="min-w-0">
+                <BotaoOuvir nome={m.nome} artista={m.artista} />
+                <div className="min-w-0 flex-1">
                   <p className="text-cream truncate">
                     {m.nome}
                     {itunesMap[chaveItunes(m)] === false && (
@@ -1024,17 +1075,20 @@ function GerenciarMusicas() {
                 <div className="flex gap-2 shrink-0 flex-wrap justify-end">
                   <label
                     title={m.cifra_path ? "Trocar o PDF da cifra" : "Enviar PDF da cifra"}
-                    className={`px-3 py-1.5 rounded-lg border text-xs transition cursor-pointer ${
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs transition cursor-pointer ${
                       m.cifra_path
                         ? "border-gold-600 text-gold-300 hover:bg-noir-800"
                         : "border-noir-700 text-cream-muted hover:text-gold-300 hover:border-gold-600"
                     } ${enviandoCifraId === m.id ? "opacity-50 pointer-events-none" : ""}`}
                   >
-                    {enviandoCifraId === m.id
-                      ? "⏳..."
-                      : m.cifra_path
-                        ? "📎 Trocar PDF"
-                        : "📎 PDF"}
+                    {enviandoCifraId === m.id ? (
+                      "⏳..."
+                    ) : (
+                      <>
+                        <Icone nome="anexo" className="w-3.5 h-3.5" />
+                        {m.cifra_path ? "Trocar PDF" : "PDF"}
+                      </>
+                    )}
                     <input
                       type="file"
                       accept="application/pdf"
@@ -1076,8 +1130,15 @@ function GerenciarMusicas() {
 let audioAdmin = null;
 let pararBotaoAnterior = null;
 
-function BotaoOuvir({ url }) {
+// Toca um trecho de 30s (iTunes). Aceita a url já pronta (listas de busca,
+// que já vêm com previewUrl) ou nome/artista pra buscar só quando clicado
+// (lista do repertório — não faz sentido consultar o iTunes pra cada linha
+// visível sem necessidade)
+function BotaoOuvir({ url, nome, artista }) {
   const [tocando, setTocando] = useState(false);
+  const [buscando, setBuscando] = useState(false);
+  const [semPreview, setSemPreview] = useState(false);
+  const urlRef = useRef(url ?? null);
 
   useEffect(
     () => () => {
@@ -1086,9 +1147,10 @@ function BotaoOuvir({ url }) {
     []
   );
 
-  if (!url) return null;
+  if (!url && !nome) return null;
+  if (semPreview) return null;
 
-  const alternar = (e) => {
+  const alternar = async (e) => {
     e.stopPropagation();
     if (tocando) {
       audioAdmin?.pause();
@@ -1098,7 +1160,20 @@ function BotaoOuvir({ url }) {
     }
     audioAdmin?.pause();
     pararBotaoAnterior?.();
-    audioAdmin = new Audio(url);
+
+    let urlTocar = urlRef.current;
+    if (!urlTocar) {
+      setBuscando(true);
+      urlTocar = await buscarPreview(nome, artista);
+      setBuscando(false);
+      if (!urlTocar) {
+        setSemPreview(true);
+        return;
+      }
+      urlRef.current = urlTocar;
+    }
+
+    audioAdmin = new Audio(urlTocar);
     audioAdmin.addEventListener("ended", () => setTocando(false));
     audioAdmin.play().catch(() => setTocando(false));
     setTocando(true);
@@ -1109,10 +1184,12 @@ function BotaoOuvir({ url }) {
     <button
       type="button"
       onClick={alternar}
+      disabled={buscando}
       aria-label={tocando ? "Parar trecho" : "Ouvir trecho"}
-      className="shrink-0 w-8 h-8 rounded-full border border-gold-600 text-gold-300 text-xs hover:bg-noir-800 transition"
+      title="Ouvir um trecho de 30s"
+      className="shrink-0 w-8 h-8 rounded-full border border-gold-600 text-gold-300 text-xs hover:bg-noir-800 transition disabled:opacity-40"
     >
-      {tocando ? "❚❚" : "▶"}
+      {buscando ? "⏳" : tocando ? "❚❚" : "▶"}
     </button>
   );
 }
@@ -1252,11 +1329,16 @@ function AbaCifras() {
               onClick={reprocessarCifrasAntigas}
               disabled={!!reprocessando}
               title="Gera as imagens das páginas pras cifras enviadas antes dessa funcionalidade existir — deixa a abertura no celular bem mais rápida"
-              className="px-3 py-1.5 rounded-lg border border-gold-600 text-xs text-gold-300 hover:bg-noir-800 transition disabled:opacity-40"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gold-600 text-xs text-gold-300 hover:bg-noir-800 transition disabled:opacity-40"
             >
-              {reprocessando
-                ? `⏳ ${reprocessando.atual}/${reprocessando.total}...`
-                : `🔁 Acelerar cifras antigas (${semImagens.length})`}
+              {reprocessando ? (
+                `⏳ ${reprocessando.atual}/${reprocessando.total}...`
+              ) : (
+                <>
+                  <Icone nome="reprocessar" className="w-3.5 h-3.5" />
+                  Acelerar cifras antigas ({semImagens.length})
+                </>
+              )}
             </button>
           )}
           <button
@@ -1328,14 +1410,17 @@ function AbaCifras() {
                     {m.estilo ? ` • ${m.estilo}` : ""}
                   </p>
                 </div>
-                <span className="shrink-0 text-gold-300 text-sm">🎼 Abrir ›</span>
+                <span className="shrink-0 inline-flex items-center gap-1 text-gold-300 text-sm">
+                  <Icone nome="cifras" className="w-4 h-4" />
+                  Abrir ›
+                </span>
               </button>
             </li>
           ))}
           {visiveis.length === 0 && (
             <li className="py-4 text-cream-muted text-sm">
               {musicas.length === 0
-                ? "Nenhuma cifra enviada ainda. Envie os PDFs na aba Músicas (botão 📎 PDF)."
+                ? "Nenhuma cifra enviada ainda. Envie os PDFs na aba Músicas (botão PDF)."
                 : "Nenhuma cifra encontrada com esse filtro."}
             </li>
           )}
@@ -1371,7 +1456,10 @@ function AbaCifras() {
                       {m.estilo ? ` • ${m.estilo}` : ""}
                     </p>
                   </div>
-                  <span className="shrink-0 text-gold-300 text-xs">🎼 Abrir ›</span>
+                  <span className="shrink-0 inline-flex items-center gap-1 text-gold-300 text-xs">
+                    <Icone nome="cifras" className="w-3.5 h-3.5" />
+                    Abrir ›
+                  </span>
                 </button>
               </li>
             ))}
@@ -2427,8 +2515,8 @@ function GerenciarVideos() {
                       className="w-20 h-12 object-cover rounded-lg border border-noir-700 shrink-0"
                     />
                   ) : (
-                    <span className="w-20 h-12 rounded-lg border border-noir-700 shrink-0 flex items-center justify-center text-lg">
-                      📷
+                    <span className="w-20 h-12 rounded-lg border border-noir-700 shrink-0 flex items-center justify-center">
+                      <Icone nome="camera" className="w-5 h-5 text-cream-muted" />
                     </span>
                   )}
                   <div className="min-w-0">
@@ -2500,12 +2588,14 @@ async function contarAcessos(caminho, inicio) {
 // não diferencia aparelho). Só funciona com o secret GOATCOUNTER_API_TOKEN
 // configurado na function; se não estiver, some da tela em vez de quebrar.
 async function buscarAparelhosUnicos(periodos) {
+  const comErro = (msg) => periodos.map(([rotulo]) => ({ rotulo, unicos: null, erro: msg }));
+
   if (!ACESSOS_FUNCTION_URL) return null;
   try {
     const {
       data: { session },
     } = await supabase.auth.getSession();
-    if (!session) return null;
+    if (!session) return comErro("Sem sessão ativa");
 
     const resp = await fetch(ACESSOS_FUNCTION_URL, {
       method: "POST",
@@ -2518,11 +2608,21 @@ async function buscarAparelhosUnicos(periodos) {
         periodos: periodos.map(([rotulo, inicio]) => ({ rotulo, inicio })),
       }),
     });
-    if (!resp.ok) return null;
-    const { resultado } = await resp.json();
-    return resultado; // [{ rotulo, unicos }]
-  } catch {
-    return null;
+
+    const texto = await resp.text();
+    let corpo = null;
+    try {
+      corpo = JSON.parse(texto);
+    } catch {
+      // resposta não era JSON — mantém corpo null, usa o texto cru abaixo
+    }
+
+    if (!resp.ok) {
+      return comErro(`${resp.status}: ${corpo?.error || texto.slice(0, 200) || "erro desconhecido"}`);
+    }
+    return corpo?.resultado ?? comErro("Resposta sem 'resultado'");
+  } catch (e) {
+    return comErro(e.message);
   }
 }
 
@@ -2623,10 +2723,11 @@ function AbaAcessos() {
                 área do músico: {d.admin ?? "—"}
               </p>
               <p
-                className="text-gold-300/90 text-xs mt-2 pt-2 border-t border-noir-800"
+                className="inline-flex items-center gap-1.5 text-gold-300/90 text-xs mt-2 pt-2 border-t border-noir-800"
                 title={d.erroUnicos || undefined}
               >
-                📱 {d.unicos ?? "—"} aparelho{d.unicos === 1 ? "" : "s"} diferente
+                <Icone nome="aparelho" className="w-3.5 h-3.5" />
+                {d.unicos ?? "—"} aparelho{d.unicos === 1 ? "" : "s"} diferente
                 {d.unicos === 1 ? "" : "s"}
               </p>
               {d.erroUnicos && (
@@ -2838,13 +2939,14 @@ function GerenciarPedidos({ onMudanca }) {
         <button
           onClick={() => setMostrar("arquivados")}
           title={`Atendidos há mais de ${DIAS_ATE_ARQUIVAR} dias`}
-          className={`px-4 py-1.5 rounded-full text-xs tracking-wide transition border ${
+          className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs tracking-wide transition border ${
             mostrar === "arquivados"
               ? "btn-gold border-transparent"
               : "border-noir-700 text-cream-muted hover:text-cream"
           }`}
         >
-          🗄 Arquivados ({contagens.arquivados})
+          <Icone nome="arquivo" className="w-3.5 h-3.5" />
+          Arquivados ({contagens.arquivados})
         </button>
       </div>
 
@@ -2935,9 +3037,10 @@ function GerenciarPedidos({ onMudanca }) {
                     mandarParaAprender(p);
                   }}
                   title="Enviar para a lista de músicas para aprender"
-                  className="shrink-0 self-center px-3 py-1.5 rounded-lg border border-gold-600 text-xs text-gold-300 hover:bg-noir-800 transition"
+                  className="shrink-0 self-center inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gold-600 text-xs text-gold-300 hover:bg-noir-800 transition"
                 >
-                  🎸 Aprender
+                  <Icone nome="aprender" className="w-3.5 h-3.5" />
+                  Aprender
                 </button>
               )}
             </li>
@@ -3049,17 +3152,19 @@ function DetalhePedidoModal({
           {cifraId && (
             <button
               onClick={() => onVerCifra(cifraId)}
-              className="btn-gold px-4 py-2 rounded-xl text-sm"
+              className="btn-gold px-4 py-2 rounded-xl text-sm inline-flex items-center gap-1.5"
             >
-              🎼 Ver cifra
+              <Icone nome="cifras" className="w-4 h-4" />
+              Ver cifra
             </button>
           )}
           {!p.atendido && ehSugestao && (
             <button
               onClick={() => onAprender(p)}
-              className="px-4 py-2 rounded-xl border border-gold-600 text-sm text-gold-300 hover:bg-noir-800 transition"
+              className="px-4 py-2 rounded-xl border border-gold-600 text-sm text-gold-300 hover:bg-noir-800 transition inline-flex items-center gap-1.5"
             >
-              🎸 Aprender
+              <Icone nome="aprender" className="w-4 h-4" />
+              Aprender
             </button>
           )}
           <button
