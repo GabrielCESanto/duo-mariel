@@ -182,21 +182,23 @@ function Login() {
 
 // Abas agrupadas no menu "Outros" — tudo que não é Cifras/Pedidos
 const ABAS_OUTROS = [
-  ["musicas", "Músicas"],
-  ["aprender", "Aprender"],
-  ["agenda", "Agenda"],
   ["afinador", "Afinador"],
+  ["agenda", "Agenda"],
+  ["aprender", "Aprender"],
+  ["musicas", "Músicas"],
   ["videos", "Vídeos"],
 ];
 
 function Painel() {
   const [searchParams] = useSearchParams();
-  const [aba, setAba] = useState(searchParams.get("aba") || "musicas");
+  const [aba, setAba] = useState(searchParams.get("aba") || "cifras");
   const [pendentes, setPendentes] = useState(0);
   const [pedidoNovo, setPedidoNovo] = useState(null);
   const [menuOutrosAberto, setMenuOutrosAberto] = useState(false);
 
-  const abasOutros = GOATCOUNTER_CODE ? [...ABAS_OUTROS, ["acessos", "Acessos"]] : ABAS_OUTROS;
+  const abasOutros = (GOATCOUNTER_CODE ? [...ABAS_OUTROS, ["acessos", "Acessos"]] : ABAS_OUTROS)
+    .slice()
+    .sort((a, b) => a[1].localeCompare(b[1], "pt-BR"));
   const estaEmOutros = abasOutros.some(([valor]) => valor === aba);
 
   const contarPendentes = async () => {
