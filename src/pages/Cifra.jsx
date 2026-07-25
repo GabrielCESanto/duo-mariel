@@ -24,6 +24,25 @@ const distanciaEntreToques = (touches) => {
   return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
 };
 
+// Ícone de olho (traço fino, respeita a cor do site via currentColor) —
+// marca a música como "em revisão" (precisa ser reensaiada)
+function IconeOlho({ className = "w-5 h-5" }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
 // "dvh" (altura real da viewport, ajustada à barra de endereço dinâmica do
 // celular) não existe em navegadores/webviews mais antigos — nesses casos
 // cai pro "vh" tradicional em vez de ficar sem altura nenhuma. Decidido via
@@ -324,7 +343,7 @@ export default function Cifra() {
     (async () => {
       const { data: m, error } = await supabase
         .from("musicas")
-        .select("id, nome, artista, cifra_path, cifra_paginas, cifra_versao, favorito")
+        .select("id, nome, artista, cifra_path, cifra_paginas, cifra_versao, favorito, revisao")
         .eq("id", id)
         .single();
 
@@ -522,6 +541,18 @@ export default function Cifra() {
     }
   };
 
+  // --- Em revisão (ícone de olho) — marca que a música precisa ser reensaiada ---
+  const alternarRevisao = async () => {
+    if (!musica) return;
+    const novoValor = !musica.revisao;
+    setMusica((m) => ({ ...m, revisao: novoValor })); // otimista
+    const { error } = await supabase.from("musicas").update({ revisao: novoValor }).eq("id", id);
+    if (error) {
+      console.error(error);
+      setMusica((m) => ({ ...m, revisao: !novoValor })); // desfaz se der erro
+    }
+  };
+
   if (sessao === undefined) {
     return (
       <p className="text-cream-muted text-center py-20">Verificando acesso...</p>
@@ -619,6 +650,16 @@ export default function Cifra() {
         <div className="gold-rule my-3 md:my-4" />
 
         <div className="relative flex items-center justify-center gap-2 px-1">
+          <button
+            onClick={alternarRevisao}
+            aria-label={musica?.revisao ? "Remover marcação de revisão" : "Marcar para revisão"}
+            title={musica?.revisao ? "Em revisão — precisa reensaiar" : "Marcar para revisão"}
+            className={`absolute left-1 shrink-0 transition ${
+              musica?.revisao ? "text-gold-400" : "text-noir-600 hover:text-gold-300"
+            }`}
+          >
+            <IconeOlho className="w-5 h-5 md:w-6 md:h-6" />
+          </button>
           <button
             onClick={alternarFavorito}
             aria-label={musica?.favorito ? "Remover dos favoritos" : "Marcar como favorita"}

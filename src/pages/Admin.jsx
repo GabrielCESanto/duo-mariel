@@ -310,6 +310,13 @@ function Icone({ nome, className = "w-5 h-5" }) {
           <path d="M17 18v-3h-3" />
         </svg>
       );
+    case "olho":
+      return (
+        <svg {...props}>
+          <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z" />
+          <circle cx="12" cy="12" r="3" />
+        </svg>
+      );
     default:
       return null;
   }
@@ -564,6 +571,7 @@ function GerenciarMusicas() {
   const [status, setStatus] = useState("");
   const [enviandoCifraId, setEnviandoCifraId] = useState(null);
   const [filtroCifra, setFiltroCifra] = useState("todas"); // todas | com | sem
+  const [filtroRevisao, setFiltroRevisao] = useState(false);
 
   // --- Checagem no iTunes (resultado fica salvo no navegador) ---
   const [filtroItunes, setFiltroItunes] = useState(false);
@@ -798,6 +806,7 @@ function GerenciarMusicas() {
     if (filtroCifra === "com" && !m.cifra_path) return false;
     if (filtroCifra === "sem" && m.cifra_path) return false;
     if (filtroItunes && itunesMap[chaveItunes(m)] !== false) return false;
+    if (filtroRevisao && !m.revisao) return false;
     const q = filtro.trim().toLowerCase();
     if (!q) return true;
     return `${m.nome} ${m.artista} ${m.estilo ?? ""}`.toLowerCase().includes(q);
@@ -982,6 +991,18 @@ function GerenciarMusicas() {
             Sem iTunes ({musicas.filter((m) => itunesMap[chaveItunes(m)] === false).length})
           </button>
           <button
+            onClick={() => setFiltroRevisao((v) => !v)}
+            title="Mostrar só as músicas marcadas para revisão (ícone de olho na tela da cifra)"
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs tracking-wide transition border ${
+              filtroRevisao
+                ? "btn-gold border-transparent"
+                : "border-noir-700 text-cream-muted hover:text-cream"
+            }`}
+          >
+            <Icone nome="olho" className="w-3.5 h-3.5" />
+            Revisão ({musicas.filter((m) => m.revisao).length})
+          </button>
+          <button
             onClick={verificarItunes}
             disabled={!!verificandoItunes || carregando}
             title="Consulta cada música na busca do iTunes (roda uma vez e fica salvo)"
@@ -1151,7 +1172,7 @@ function AbaCifras() {
   const carregar = () =>
     supabase
       .from("musicas")
-      .select("id, nome, artista, estilo, cifra_path, cifra_paginas, cifra_versao, favorito")
+      .select("id, nome, artista, estilo, cifra_path, cifra_paginas, cifra_versao, favorito, revisao")
       .not("cifra_path", "is", null)
       .order("nome")
       .order("artista")
@@ -1315,7 +1336,15 @@ function AbaCifras() {
                 className="flex-1 min-w-0 py-3 flex items-center justify-between gap-3 text-left hover:bg-noir-800/50 rounded-lg px-2 -mx-2 transition"
               >
                 <div className="min-w-0">
-                  <p className="text-cream truncate">{m.nome}</p>
+                  <p className="text-cream truncate flex items-center gap-1.5">
+                    {m.revisao && (
+                      <Icone
+                        nome="olho"
+                        className="w-3.5 h-3.5 text-gold-400/80 shrink-0"
+                      />
+                    )}
+                    <span className="truncate">{m.nome}</span>
+                  </p>
                   <p className="text-cream-muted text-sm truncate">
                     {m.artista}
                     {m.estilo ? ` • ${m.estilo}` : ""}
@@ -1993,13 +2022,14 @@ function GerenciarAgenda() {
   const [form, setForm] = useState(FORM_EVENTO_VAZIO);
   const [editandoId, setEditandoId] = useState(null);
   const [status, setStatus] = useState("");
+  const [mostrarRealizados, setMostrarRealizados] = useState(false);
 
   const carregar = async () => {
     setCarregando(true);
     const { data, error } = await supabase
       .from("eventos")
       .select("*")
-      .order("data", { ascending: false })
+      .order("data", { ascending: true })
       .order("hora");
     if (!error) setEventos(data ?? []);
     setCarregando(false);
@@ -2072,6 +2102,11 @@ function GerenciarAgenda() {
   };
 
   const hojeIso = new Date().toISOString().slice(0, 10);
+  // Por padrão só os próximos shows (mais relevante no dia a dia); os já
+  // realizados ficam disponíveis num filtro, sem sumir do histórico
+  const proximos = eventos.filter((ev) => ev.data >= hojeIso);
+  const realizados = eventos.filter((ev) => ev.data < hojeIso).slice().reverse();
+  const visiveis = mostrarRealizados ? realizados : proximos;
 
   return (
     <div>
@@ -2156,13 +2191,37 @@ function GerenciarAgenda() {
 
       {/* Lista */}
       <div className="border border-noir-700 rounded-2xl p-5 bg-noir-900/50">
-        <h2 className="section-title text-sm mb-3">Shows ({eventos.length})</h2>
+        <div className="flex items-center justify-between gap-4 mb-3 flex-wrap">
+          <h2 className="section-title text-sm">Shows ({visiveis.length})</h2>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setMostrarRealizados(false)}
+              className={`px-3 py-1.5 rounded-full text-xs tracking-wide transition border ${
+                !mostrarRealizados
+                  ? "btn-gold border-transparent"
+                  : "border-noir-700 text-cream-muted hover:text-cream"
+              }`}
+            >
+              Próximos ({proximos.length})
+            </button>
+            <button
+              onClick={() => setMostrarRealizados(true)}
+              className={`px-3 py-1.5 rounded-full text-xs tracking-wide transition border ${
+                mostrarRealizados
+                  ? "btn-gold border-transparent"
+                  : "border-noir-700 text-cream-muted hover:text-cream"
+              }`}
+            >
+              Realizados ({realizados.length})
+            </button>
+          </div>
+        </div>
 
         {carregando ? (
           <p className="text-cream-muted text-sm py-4">Carregando...</p>
         ) : (
           <ul className="divide-y divide-noir-800 max-h-[480px] overflow-y-auto pr-2">
-            {eventos.map((ev) => {
+            {visiveis.map((ev) => {
               const passado = ev.data < hojeIso;
               return (
                 <li key={ev.id} className="py-3 flex items-center justify-between gap-3">
@@ -2200,8 +2259,10 @@ function GerenciarAgenda() {
                 </li>
               );
             })}
-            {eventos.length === 0 && (
-              <li className="py-4 text-cream-muted text-sm">Nenhum show cadastrado.</li>
+            {visiveis.length === 0 && (
+              <li className="py-4 text-cream-muted text-sm">
+                {mostrarRealizados ? "Nenhum show realizado ainda." : "Nenhum show futuro cadastrado."}
+              </li>
             )}
           </ul>
         )}
