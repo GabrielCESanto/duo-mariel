@@ -1,5 +1,26 @@
 import { useEffect, useRef, useState } from "react";
 
+// Ícone em traço fino (respeita a cor do site via currentColor) — combina
+// com o padrão usado no Admin, em vez de emoji colorido
+function IconeMicrofone({ className = "w-4 h-4" }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <rect x="9" y="2" width="6" height="12" rx="3" />
+      <path d="M5 11a7 7 0 0014 0" />
+      <line x1="12" y1="18" x2="12" y2="22" />
+      <line x1="8" y1="22" x2="16" y2="22" />
+    </svg>
+  );
+}
+
 // Afinação padrão do violão, da corda mais grave (6ª) à mais aguda (1ª)
 const CORDAS = [
   { nota: "E2", freq: 82.41 },
@@ -200,8 +221,12 @@ export default function Afinador() {
 
       {!ouvindo ? (
         <div className="text-center py-8">
-          <button onClick={iniciarEscuta} className="btn-gold px-6 py-3 rounded-xl text-sm">
-            🎙️ Começar a afinar
+          <button
+            onClick={iniciarEscuta}
+            className="btn-gold px-6 py-3 rounded-xl text-sm inline-flex items-center gap-2"
+          >
+            <IconeMicrofone className="w-4 h-4" />
+            Começar a afinar
           </button>
         </div>
       ) : (

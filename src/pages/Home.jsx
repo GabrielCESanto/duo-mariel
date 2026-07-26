@@ -11,6 +11,25 @@ import Agenda from "../components/Agenda";
 
 const BASE = import.meta.env.BASE_URL;
 
+// Ícone em traço fino (respeita a cor do site via currentColor) — combina
+// com o padrão usado no Admin, em vez de emoji colorido
+function IconeMais({ className = "w-4 h-4" }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      className={className}
+    >
+      <circle cx="12" cy="12" r="9" />
+      <line x1="12" y1="8" x2="12" y2="16" />
+      <line x1="8" y1="12" x2="16" y2="12" />
+    </svg>
+  );
+}
+
 export default function Home() {
   const { musicas, carregando } = useMusicas();
   const { videos } = useVideos();
@@ -222,9 +241,10 @@ export default function Home() {
             </p>
             <button
               onClick={() => setSugestaoAberta(true)}
-              className="btn-gold px-6 py-3 rounded-xl text-sm"
+              className="btn-gold px-6 py-3 rounded-xl text-sm inline-flex items-center gap-2"
             >
-              🎸 Pedir para entrar no repertório
+              <IconeMais className="w-4 h-4" />
+              Pedir para entrar no repertório
             </button>
           </div>
         </section>
