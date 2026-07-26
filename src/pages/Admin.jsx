@@ -2559,10 +2559,17 @@ function GerenciarVideos() {
 
 /* ------------------------- ACESSOS ------------------------- */
 
+// Usa os componentes de data LOCAIS (ano/mês/dia), não toISOString() — essa
+// converte pra UTC antes de formatar, e à noite num fuso atrás de UTC
+// (Brasil, UTC-3) o "hoje" em UTC já é o dia seguinte, pedindo uma data
+// futura pro GoatCounter (que aí não acha nada e responde 404)
 const dataIso = (diasAtras = 0) => {
   const d = new Date();
   d.setDate(d.getDate() - diasAtras);
-  return d.toISOString().slice(0, 10);
+  const ano = d.getFullYear();
+  const mes = String(d.getMonth() + 1).padStart(2, "0");
+  const dia = String(d.getDate()).padStart(2, "0");
+  return `${ano}-${mes}-${dia}`;
 };
 
 // Endpoint público de contador do GoatCounter (sem chave/senha)
