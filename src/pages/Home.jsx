@@ -249,6 +249,9 @@ export default function Home() {
           </div>
         </section>
 
+        {/* AGENDA */}
+        <Agenda />
+
         {/* VÍDEOS */}
         {videos.length > 0 && (
           <section className="mt-10">
@@ -297,9 +300,6 @@ export default function Home() {
             </div>
           </section>
         )}
-
-        {/* AGENDA */}
-        <Agenda />
 
         {/* SOBRE */}
         <section className="border border-noir-700 rounded-2xl p-6 mt-10 bg-noir-900/50">
