@@ -268,13 +268,23 @@ export default function Home() {
                       allowFullScreen
                     />
                   ) : (
-                    <iframe
-                      loading="lazy"
-                      className="w-full aspect-[9/16] max-h-[540px]"
-                      src={`https://www.instagram.com/reel/${v.instagram_id}/embed`}
-                      title={v.titulo}
-                      allowFullScreen
-                    />
+                    // O embed do Instagram vem com cabeçalho/rodapé brancos
+                    // fixos que não dá pra restilizar (iframe de outro
+                    // domínio). Em vez disso, renderiza o card inteiro maior
+                    // e recorta com overflow:hidden, deixando só o vídeo —
+                    // os valores de recorte (topo/altura extra) são uma
+                    // estimativa da altura do cabeçalho+rodapé do Instagram,
+                    // pode precisar de ajuste fino se cortar errado
+                    <div className="relative w-full aspect-[9/16] max-h-[540px] overflow-hidden">
+                      <iframe
+                        loading="lazy"
+                        className="absolute left-0 w-full border-0"
+                        style={{ top: -60, height: "calc(100% + 150px)" }}
+                        src={`https://www.instagram.com/reel/${v.instagram_id}/embed`}
+                        title={v.titulo}
+                        allowFullScreen
+                      />
+                    </div>
                   )}
                   <p className="p-3 text-center text-sm text-cream-muted">{v.titulo}</p>
                 </div>
