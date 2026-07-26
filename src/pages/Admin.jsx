@@ -2450,6 +2450,7 @@ function GerenciarVideos() {
   const [videos, setVideos] = useState([]);
   const [carregando, setCarregando] = useState(true);
   const [form, setForm] = useState({ titulo: "", link: "" });
+  const [editandoId, setEditandoId] = useState(null);
   const [status, setStatus] = useState("");
 
   const carregar = async () => {
@@ -2466,7 +2467,7 @@ function GerenciarVideos() {
     carregar();
   }, []);
 
-  const adicionar = async (e) => {
+  const salvar = async (e) => {
     e.preventDefault();
     const titulo = form.titulo.trim();
     const youtubeId = extrairYoutubeId(form.link);
@@ -2479,9 +2480,10 @@ function GerenciarVideos() {
     }
 
     setStatus("⏳ Salvando...");
-    const { error } = await supabase
-      .from("videos")
-      .insert({ titulo, youtube_id: youtubeId, instagram_id: instagramId });
+    const registro = { titulo, youtube_id: youtubeId, instagram_id: instagramId };
+    const { error } = editandoId
+      ? await supabase.from("videos").update(registro).eq("id", editandoId)
+      : await supabase.from("videos").insert(registro);
 
     if (error) {
       console.error(error);
@@ -2490,9 +2492,26 @@ function GerenciarVideos() {
     }
 
     setForm({ titulo: "", link: "" });
-    setStatus("✅ Vídeo adicionado!");
+    setEditandoId(null);
+    setStatus(editandoId ? "✅ Vídeo atualizado!" : "✅ Vídeo adicionado!");
     setTimeout(() => setStatus(""), 2500);
     carregar();
+  };
+
+  const editar = (v) => {
+    setEditandoId(v.id);
+    setForm({
+      titulo: v.titulo,
+      link: v.youtube_id
+        ? `https://youtu.be/${v.youtube_id}`
+        : `https://www.instagram.com/reel/${v.instagram_id}/`,
+    });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const cancelarEdicao = () => {
+    setEditandoId(null);
+    setForm({ titulo: "", link: "" });
   };
 
   const excluir = async (v) => {
@@ -2510,10 +2529,12 @@ function GerenciarVideos() {
     <div>
       {/* Formulário */}
       <form
-        onSubmit={adicionar}
+        onSubmit={salvar}
         className="border border-noir-700 rounded-2xl p-5 bg-noir-900/50 mb-6"
       >
-        <h2 className="section-title text-sm mb-4">Adicionar vídeo</h2>
+        <h2 className="section-title text-sm mb-4">
+          {editandoId ? "Editar vídeo" : "Adicionar vídeo"}
+        </h2>
 
         <div className="grid gap-3 sm:grid-cols-2">
           <input
@@ -2534,8 +2555,17 @@ function GerenciarVideos() {
 
         <div className="mt-4 flex items-center gap-3">
           <button type="submit" className="btn-gold px-6 py-2.5 rounded-xl text-sm">
-            Adicionar
+            {editandoId ? "Salvar alterações" : "Adicionar"}
           </button>
+          {editandoId && (
+            <button
+              type="button"
+              onClick={cancelarEdicao}
+              className="px-4 py-2.5 rounded-xl border border-noir-700 text-sm text-cream-muted hover:text-cream transition"
+            >
+              Cancelar
+            </button>
+          )}
           {status && <span className="text-sm text-cream-muted">{status}</span>}
         </div>
       </form>
@@ -2580,12 +2610,20 @@ function GerenciarVideos() {
                     </a>
                   </div>
                 </div>
-                <button
-                  onClick={() => excluir(v)}
-                  className="px-3 py-1.5 rounded-lg border border-noir-700 text-xs text-cream-muted hover:text-red-400 hover:border-red-900 transition shrink-0"
-                >
-                  Excluir
-                </button>
+                <div className="flex gap-2 shrink-0">
+                  <button
+                    onClick={() => editar(v)}
+                    className="px-3 py-1.5 rounded-lg border border-noir-700 text-xs text-cream-muted hover:text-gold-300 hover:border-gold-600 transition"
+                  >
+                    Editar
+                  </button>
+                  <button
+                    onClick={() => excluir(v)}
+                    className="px-3 py-1.5 rounded-lg border border-noir-700 text-xs text-cream-muted hover:text-red-400 hover:border-red-900 transition"
+                  >
+                    Excluir
+                  </button>
+                </div>
               </li>
             ))}
             {videos.length === 0 && (
