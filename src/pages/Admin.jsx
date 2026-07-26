@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { supabase, supabaseConfigured, ACESSOS_FUNCTION_URL, anonKey } from "../lib/supabase";
+import { supabase, supabaseConfigured } from "../lib/supabase";
 import {
   assinarDownloadCifras,
   baixarCifrasEmCache,
@@ -343,13 +343,6 @@ function Icone({ nome, className = "w-5 h-5" }) {
           <rect x="3" y="4" width="18" height="5" rx="1" />
           <path d="M5 9v9a2 2 0 002 2h10a2 2 0 002-2V9" />
           <line x1="10" y1="13" x2="14" y2="13" />
-        </svg>
-      );
-    case "aparelho":
-      return (
-        <svg {...props}>
-          <rect x="7" y="2" width="10" height="20" rx="2" />
-          <line x1="11" y1="18" x2="13" y2="18" />
         </svg>
       );
     case "camera":
@@ -2590,49 +2583,6 @@ async function contarAcessos(caminho, inicio) {
   }
 }
 
-// Aparelhos únicos por período — via edge function, que consulta a API
-// privada do GoatCounter (o endpoint público de contador só dá pageviews,
-// não diferencia aparelho). Só funciona com o secret GOATCOUNTER_API_TOKEN
-// configurado na function; se não estiver, some da tela em vez de quebrar.
-async function buscarAparelhosUnicos(periodos) {
-  const comErro = (msg) => periodos.map(([rotulo]) => ({ rotulo, unicos: null, erro: msg }));
-
-  if (!ACESSOS_FUNCTION_URL) return null;
-  try {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    if (!session) return comErro("Sem sessão ativa");
-
-    const resp = await fetch(ACESSOS_FUNCTION_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        apikey: anonKey,
-        Authorization: `Bearer ${session.access_token}`,
-      },
-      body: JSON.stringify({
-        periodos: periodos.map(([rotulo, inicio]) => ({ rotulo, inicio })),
-      }),
-    });
-
-    const texto = await resp.text();
-    let corpo = null;
-    try {
-      corpo = JSON.parse(texto);
-    } catch {
-      // resposta não era JSON — mantém corpo null, usa o texto cru abaixo
-    }
-
-    if (!resp.ok) {
-      return comErro(`${resp.status}: ${corpo?.error || texto.slice(0, 200) || "erro desconhecido"}`);
-    }
-    return corpo?.resultado ?? comErro("Resposta sem 'resultado'");
-  } catch (e) {
-    return comErro(e.message);
-  }
-}
-
 function AbaAcessos() {
   const [dados, setDados] = useState(null);
   const [erro, setErro] = useState(false);
@@ -2645,30 +2595,22 @@ function AbaAcessos() {
       ["7 dias", dataIso(6)],
       ["30 dias", dataIso(29)],
     ];
-    // As chamadas são independentes — paralelizar deixa o carregamento
+    // As 6 chamadas são independentes — paralelizar deixa o carregamento
     // bem mais rápido do que esperar uma de cada vez
-    const [porPeriodo, unicos] = await Promise.all([
-      Promise.all(
-        periodos.map(async ([rotulo, inicio]) => {
-          const [publico, admin] = await Promise.all([
-            contarAcessos("/", inicio),
-            contarAcessos("/admin", inicio),
-          ]);
-          return { rotulo, publico, admin };
-        })
-      ),
-      buscarAparelhosUnicos(periodos),
-    ]);
-    if (porPeriodo.every((r) => r.publico === null && r.admin === null)) {
+    const resultado = await Promise.all(
+      periodos.map(async ([rotulo, inicio]) => {
+        const [publico, admin] = await Promise.all([
+          contarAcessos("/", inicio),
+          contarAcessos("/admin", inicio),
+        ]);
+        return { rotulo, publico, admin };
+      })
+    );
+    if (resultado.every((r) => r.publico === null && r.admin === null)) {
       setErro(true);
       return;
     }
-    setDados(
-      porPeriodo.map((r) => {
-        const encontrado = unicos?.find((u) => u.rotulo === r.rotulo);
-        return { ...r, unicos: encontrado?.unicos ?? null, erroUnicos: encontrado?.erro ?? null };
-      })
-    );
+    setDados(resultado);
   };
 
   useEffect(() => {
@@ -2729,19 +2671,6 @@ function AbaAcessos() {
               <p className="text-cream-muted/60 text-[11px] mt-2">
                 área do músico: {d.admin ?? "—"}
               </p>
-              <p
-                className="inline-flex items-center gap-1.5 text-gold-300/90 text-xs mt-2 pt-2 border-t border-noir-800"
-                title={d.erroUnicos || undefined}
-              >
-                <Icone nome="aparelho" className="w-3.5 h-3.5" />
-                {d.unicos ?? "—"} aparelho{d.unicos === 1 ? "" : "s"} diferente
-                {d.unicos === 1 ? "" : "s"}
-              </p>
-              {d.erroUnicos && (
-                <p className="text-red-400/80 text-[10px] mt-1 break-words">
-                  {d.erroUnicos}
-                </p>
-              )}
             </div>
           ))}
         </div>
@@ -2749,9 +2678,17 @@ function AbaAcessos() {
 
       <p className="text-cream-muted/60 text-[11px] mt-4">
         "Visitas ao site"/"área do músico" contam cada carregamento de página
-        (pageviews). "Aparelhos diferentes" é uma estimativa de visitantes
-        únicos feita pelo GoatCounter (sem cookies) — some da lista se a
-        function de aparelhos únicos não estiver configurada.
+        (pageviews) — não visitantes únicos. Pra ver "Visits" (estimativa de
+        visitantes únicos) x "Pageviews", confira o{" "}
+        <a
+          href={`https://${GOATCOUNTER_CODE}.goatcounter.com`}
+          target="_blank"
+          rel="noreferrer"
+          className="text-gold-300 hover:underline"
+        >
+          painel completo do GoatCounter
+        </a>
+        .
       </p>
     </div>
   );

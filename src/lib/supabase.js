@@ -13,8 +13,4 @@ export const PEDIDO_FUNCTION_URL = supabaseConfigured
   ? `${url}/functions/v1/pedido`
   : null;
 
-export const ACESSOS_FUNCTION_URL = supabaseConfigured
-  ? `${url}/functions/v1/acessos`
-  : null;
-
 export { anonKey };
