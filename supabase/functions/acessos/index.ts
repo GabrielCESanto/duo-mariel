@@ -24,16 +24,24 @@ Deno.serve(async (req) => {
   try {
     // Confere que quem chamou está de fato autenticado no Supabase (mesma
     // sessão usada no Admin) — sem isso, qualquer um poderia bater nesse
-    // endpoint e consumir a cota da API do GoatCounter
+    // endpoint e consumir a cota da API do GoatCounter.
+    // getUser() SEM argumento lê a sessão interna do client (que não existe
+    // aqui, é serverless) — precisa passar o JWT explicitamente pra validar.
+    const authHeader = req.headers.get("Authorization") ?? "";
+    const jwt = authHeader.replace(/^Bearer\s+/i, "");
+    if (!jwt) return json({ error: "Não autenticado" }, 401);
+
     const supabaseAuth = createClient(
       Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_ANON_KEY")!,
-      { global: { headers: { Authorization: req.headers.get("Authorization") ?? "" } } }
+      Deno.env.get("SUPABASE_ANON_KEY")!
     );
     const {
       data: { user },
-    } = await supabaseAuth.auth.getUser();
-    if (!user) return json({ error: "Não autenticado" }, 401);
+      error: authError,
+    } = await supabaseAuth.auth.getUser(jwt);
+    if (authError || !user) {
+      return json({ error: `Não autenticado: ${authError?.message ?? "sem usuário"}` }, 401);
+    }
 
     const token = Deno.env.get("GOATCOUNTER_API_TOKEN");
     const codigo = Deno.env.get("GOATCOUNTER_CODE");
