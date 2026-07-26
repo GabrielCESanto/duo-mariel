@@ -278,8 +278,13 @@ export default function Home() {
                     <div className="relative w-full aspect-[9/16] max-h-[540px] overflow-hidden">
                       <iframe
                         loading="lazy"
-                        className="absolute left-0 w-full border-0"
-                        style={{ top: -60, height: "calc(100% + 150px)" }}
+                        className="absolute border-0"
+                        style={{
+                          top: -60,
+                          left: "-15%",
+                          width: "130%",
+                          height: "calc(100% + 230px)",
+                        }}
                         src={`https://www.instagram.com/reel/${v.instagram_id}/embed`}
                         title={v.titulo}
                         allowFullScreen
