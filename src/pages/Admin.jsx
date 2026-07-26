@@ -607,6 +607,7 @@ function GerenciarMusicas() {
   const [status, setStatus] = useState("");
   const [enviandoCifraId, setEnviandoCifraId] = useState(null);
   const [filtroCifra, setFiltroCifra] = useState("todas"); // todas | com | sem
+  const [musicaParaTrocarItunes, setMusicaParaTrocarItunes] = useState(null);
 
   // --- Checagem no iTunes (resultado fica salvo no navegador) ---
   const [filtroItunes, setFiltroItunes] = useState(false);
@@ -758,6 +759,25 @@ function GerenciarMusicas() {
     if (arquivos.length > 0) {
       await supabase.storage.from("cifras").remove(arquivos);
     }
+    carregar();
+  };
+
+  // Reatribui nome/artista/estilo a partir de outro resultado do iTunes —
+  // útil quando o match automático veio errado (nome parecido, artista
+  // diferente) e precisa trocar sem refazer o cadastro do zero
+  const confirmarTrocaItunes = async ({ nome, artista, estilo }) => {
+    const { error } = await supabase
+      .from("musicas")
+      .update({ nome, artista, estilo: estilo || null })
+      .eq("id", musicaParaTrocarItunes.id);
+    if (error) {
+      console.error(error);
+      setStatus("❌ Erro ao trocar dados do iTunes.");
+      return;
+    }
+    setStatus(`✅ "${nome}" atualizada!`);
+    setTimeout(() => setStatus(""), 2500);
+    setMusicaParaTrocarItunes(null);
     carregar();
   };
 
@@ -1093,6 +1113,14 @@ function GerenciarMusicas() {
                     />
                   </label>
                   <button
+                    onClick={() => setMusicaParaTrocarItunes(m)}
+                    title="Buscar outro resultado no iTunes pra corrigir nome/artista/estilo"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-noir-700 text-xs text-cream-muted hover:text-gold-300 hover:border-gold-600 transition"
+                  >
+                    <Icone nome="reprocessar" className="w-3.5 h-3.5" />
+                    iTunes
+                  </button>
+                  <button
                     onClick={() => editar(m)}
                     className="px-3 py-1.5 rounded-lg border border-noir-700 text-xs text-cream-muted hover:text-gold-300 hover:border-gold-600 transition"
                   >
@@ -1113,6 +1141,18 @@ function GerenciarMusicas() {
           </ul>
         )}
       </div>
+
+      {musicaParaTrocarItunes && (
+        <ModalBuscaItunes
+          nomeInicial={musicaParaTrocarItunes.nome}
+          artistaInicial={musicaParaTrocarItunes.artista}
+          titulo="Trocar dados do iTunes"
+          descricao="Busque outro resultado no iTunes pra corrigir nome/artista/estilo desta música."
+          textoConfirmar="Salvar"
+          onFechar={() => setMusicaParaTrocarItunes(null)}
+          onConfirmar={confirmarTrocaItunes}
+        />
+      )}
     </div>
   );
 }
@@ -1888,8 +1928,12 @@ function GerenciarSugestoes() {
       </div>
 
       {sugestaoParaMover && (
-        <ModalMoverRepertorio
-          sugestao={sugestaoParaMover}
+        <ModalBuscaItunes
+          nomeInicial={sugestaoParaMover.musica}
+          artistaInicial={sugestaoParaMover.artista || ""}
+          titulo="Adicionar ao repertório"
+          descricao="Busque no iTunes pra preencher automático, ou digite manualmente."
+          textoConfirmar="Adicionar ao repertório"
           onFechar={() => setSugestaoParaMover(null)}
           onConfirmar={confirmarMoverRepertorio}
         />
@@ -1901,9 +1945,17 @@ function GerenciarSugestoes() {
 // Confirma o vínculo antes de mover uma sugestão pro repertório: busca no
 // iTunes pra preencher artista/estilo/capa automaticamente, com entrada
 // manual como alternativa caso não encontre a música
-function ModalMoverRepertorio({ sugestao, onFechar, onConfirmar }) {
-  const [nome, setNome] = useState(sugestao.musica);
-  const [artista, setArtista] = useState(sugestao.artista || "");
+function ModalBuscaItunes({
+  nomeInicial,
+  artistaInicial = "",
+  titulo,
+  descricao,
+  textoConfirmar,
+  onFechar,
+  onConfirmar,
+}) {
+  const [nome, setNome] = useState(nomeInicial);
+  const [artista, setArtista] = useState(artistaInicial);
   const [estilo, setEstilo] = useState("");
   const [salvando, setSalvando] = useState(false);
 
@@ -1954,10 +2006,8 @@ function ModalMoverRepertorio({ sugestao, onFechar, onConfirmar }) {
         className="w-full max-w-md rounded-2xl border border-noir-700 bg-noir-900 p-6"
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 className="section-title text-base mb-1">Adicionar ao repertório</h3>
-        <p className="text-cream-muted text-xs mb-4">
-          Busque no iTunes pra preencher automático, ou digite manualmente.
-        </p>
+        <h3 className="section-title text-base mb-1">{titulo}</h3>
+        <p className="text-cream-muted text-xs mb-4">{descricao}</p>
 
         <div className="grid gap-3">
           <input
@@ -2032,7 +2082,7 @@ function ModalMoverRepertorio({ sugestao, onFechar, onConfirmar }) {
             disabled={salvando || !nome.trim() || !artista.trim()}
             className="btn-gold px-5 py-2 rounded-xl text-sm disabled:opacity-50"
           >
-            {salvando ? "Salvando..." : "Adicionar ao repertório"}
+            {salvando ? "Salvando..." : textoConfirmar}
           </button>
         </div>
       </div>
