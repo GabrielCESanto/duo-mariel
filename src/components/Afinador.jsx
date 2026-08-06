@@ -45,12 +45,17 @@ const centavosDeDesvio = (freq, freqAlvo) => Math.round(1200 * Math.log2(freq / 
 // Abaixo desse limiar, o pico de autocorrelação não é confiável o
 // suficiente pra virar leitura (som não-periódico: ruído de fundo, ou o
 // instante em que a corda apagando vira mais harmônico/ruído do que tom
-// fundamental). É o que fazia a nota "trocar" bruscamente bem no momento
-// em que a corda parava de soar, em vez de simplesmente sumir — a leitura
-// ruim daquele instante entrava na mediana como se fosse válida. Segue a
-// mesma ideia de "clarity threshold" usada por outros afinadores web (ex.:
-// Pitchy/McLeod), que descartam a leitura em vez de aceitar qualquer pico.
-const CLAREZA_MINIMA = 0.85;
+// fundamental). Segue a mesma ideia de "clarity threshold" usada por
+// outros afinadores web (ex.: Pitchy/McLeod), que descartam a leitura em
+// vez de aceitar qualquer pico.
+// Começou em 0.85, mas isso rejeitava TODA leitura das 3 cordas mais
+// graves de nylon — cordas encordoadas têm harmônicos mais fortes/
+// complexos em relação à fundamental (mais ainda em nylon), então a
+// proporção pico/energia raramente chegava perto de 0.85 mesmo com a nota
+// certa soando limpa. 0.6 ainda filtra ruído de fundo/silêncio de verdade
+// (que fica bem mais perto de 0), só não exige um tom quase perfeitamente
+// limpo pra aceitar a leitura.
+const CLAREZA_MINIMA = 0.6;
 
 // Detecta a frequência fundamental por autocorrelação (algoritmo ACF2+,
 // clássico para afinadores — bom equilíbrio entre precisão e custo).
