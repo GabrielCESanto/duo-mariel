@@ -1,0 +1,118 @@
+FONTE QUEBRADA (87 arquivos)
+Abrem normal num leitor de PDF -- so a extracao automatica de texto falha.
+======================================================================
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Ainda Gosto Dela.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\All Of Me.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Amigo Apaixonado.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Amo Noite e Dia.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Aonde Quer Que Eu Vá.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Apenas Mais Uma de Amor.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Assim Caminha a Humanidade.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Astronauta de Mármore.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Behind Blue Eyes.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Borboletas.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Caça e Caçador.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Chopis Centis.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Colo de Menina.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Como Uma Onda.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Como Vai Você.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Dancing Queen.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Daughters.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\De Tanto Te Querer.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Deixa a Vida Me Levar.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Depois do Prazer.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Domingo.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Enquanto Houver Sol.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Esperando Na Janela.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Essa Tal Liberdade.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Eu Sei De Cor.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Eu Te Amo, Te Amo, Te Amo.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Fada.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Fly Away.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Gravity.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Home.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Homem Aranha.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Hotel California.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\How You Remind Me.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\I Don_t Want To Miss A Thing.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Iris.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Just the two of us.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Lanterna Dos Afogados.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Lenha.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Linda Demais.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Livin'on A Prayer.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Logo Eu.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Luz Dos Olhos.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Meu Ébano.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Mineirinho.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Mundo Animal.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Naquela Mesa.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Nova York.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Não Deixe o Samba Morrer.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\O Destino Não Quis.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\O Mundo É Tão Pequeno.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\O Que É Que Tem.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Onde você Mora.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Out-door.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Paciência.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Papel Marchê.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Pelados Em Santos.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Por Você.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Que País É Este_.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Querendo Te Amar.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Razões e Emoções.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Recado à minha amada.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Sandra Rosa Madalena.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Se.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Seja Para Mim.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Sina.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\So Sick.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Sorte.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Sutilmente.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Sweet Dreams.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Take On Me.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Telegrama.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Tempo Perdido.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Tempos Modernos.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Tive Razão.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Toda Forma de Amor.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Tua Boca.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Um Anjo do Céu.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Upside Down.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Vai Dar Namoro.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Verdade.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Versace On The Floor.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Vida Vazia.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Vira-Vira.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Você me vira a cabeça.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Wake Me Up When September Ends.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Whisky A Go Go.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Wish You Were Here.pdf
+
+
+SEM ACORDES (23 arquivos)
+Provavelmente PDF de letra sem cifra (impressao de site de letras) ou imagem escaneada.
+======================================================================
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Bad Day.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Blackbird.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Codinome Beija-Flor.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Coisa Linda.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Debaixo dos caracóis.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Eu e Você Sempre.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Eu só quero um xodó.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Garoto de Aluguel.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Hit the road jack.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Homem com H.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Jackie Tequila.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Let it be.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Meu Erro.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Neon.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Oceano.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Pra Você Dar o Nome.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Sampa.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Samurai.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Segredos.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Seu astral.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Trem das onze.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\Done\Vem quente que eu estou fervendo.pdf
+e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório\What More Can I Say.pdf

@@ -11,3 +11,10 @@ supabase/.temp
 
 # Planilhas locais do repertorio
 Repert*rio/
+
+# Ferramentas de conversão PDF->cho (scripts/): cache do Python e o modelo
+# de OCR do Tesseract (15MB, baixado à parte) não entram no repo; os logs de
+# rodada em lote também não, só o relatório/listas já resumidos
+scripts/__pycache__/
+scripts/tessdata/
+scripts/*.log

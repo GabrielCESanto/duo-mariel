@@ -372,7 +372,7 @@ function Painel() {
     supabase
       .from("musicas")
       .select("id, nome")
-      .not("cifra_path", "is", null)
+      .or("cifra_path.not.is.null,cifra_cho.not.is.null")
       .then(({ data, error }) => {
         if (error) return;
         const mapa = {};
@@ -748,7 +748,7 @@ function GerenciarMusicas() {
   };
 
   const excluir = async (m) => {
-    if (!window.confirm(`Excluir "${m.nome} — ${m.artista}"?${m.cifra_path ? "\nA cifra em PDF também será apagada." : ""}`)) return;
+    if (!window.confirm(`Excluir "${m.nome} — ${m.artista}"?${m.cifra_path || m.cifra_cho ? "\nA cifra também será apagada." : ""}`)) return;
     const { error } = await supabase.from("musicas").delete().eq("id", m.id);
     if (error) {
       console.error(error);
@@ -857,9 +857,39 @@ function GerenciarMusicas() {
     carregar();
   };
 
+  // Cifra em ChordPro (.cho): é só texto, guardado direto na linha da
+  // música — sem Storage, sem gerar imagem nenhuma, abre instantâneo
+  const enviarCho = async (m, arquivo) => {
+    if (!arquivo) return;
+    if (!arquivo.name.toLowerCase().endsWith(".cho")) {
+      setStatus("❌ Envie um arquivo .cho.");
+      return;
+    }
+
+    setEnviandoCifraId(m.id);
+    setStatus("⏳ Enviando .cho...");
+
+    const texto = await arquivo.text();
+    const { error } = await supabase
+      .from("musicas")
+      .update({ cifra_cho: texto })
+      .eq("id", m.id);
+
+    if (error) {
+      console.error(error);
+      setStatus("❌ Erro ao enviar o .cho.");
+    } else {
+      setStatus("✅ .cho enviado!");
+      setTimeout(() => setStatus(""), 2500);
+    }
+    setEnviandoCifraId(null);
+    carregar();
+  };
+
   const visiveis = musicas.filter((m) => {
-    if (filtroCifra === "com" && !m.cifra_path) return false;
-    if (filtroCifra === "sem" && m.cifra_path) return false;
+    const temCifra = Boolean(m.cifra_path || m.cifra_cho);
+    if (filtroCifra === "com" && !temCifra) return false;
+    if (filtroCifra === "sem" && temCifra) return false;
     if (filtroItunes && itunesMap[chaveItunes(m)] !== false) return false;
     const q = filtro.trim().toLowerCase();
     if (!q) return true;
@@ -873,7 +903,7 @@ function GerenciarMusicas() {
       "Música": m.nome,
       "Artista": m.artista,
       "Estilo": m.estilo ?? "",
-      "Cifra": m.cifra_path ? "Sim" : "",
+      "Cifra": m.cifra_path || m.cifra_cho ? "Sim" : "",
     }));
     const ws = XLSX.utils.json_to_sheet(dados);
     ws["!cols"] = [{ wch: 40 }, { wch: 30 }, { wch: 16 }, { wch: 8 }];
@@ -1018,8 +1048,8 @@ function GerenciarMusicas() {
         <div className="flex gap-2 mb-2">
           {[
             ["todas", `Todas (${musicas.length})`],
-            ["com", `Com cifra (${musicas.filter((m) => m.cifra_path).length})`],
-            ["sem", `Sem cifra (${musicas.filter((m) => !m.cifra_path).length})`],
+            ["com", `Com cifra (${musicas.filter((m) => m.cifra_path || m.cifra_cho).length})`],
+            ["sem", `Sem cifra (${musicas.filter((m) => !m.cifra_path && !m.cifra_cho).length})`],
           ].map(([valor, rotulo]) => (
             <button
               key={valor}
@@ -1108,6 +1138,32 @@ function GerenciarMusicas() {
                       className="hidden"
                       onChange={(e) => {
                         enviarCifra(m, e.target.files?.[0]);
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                  <label
+                    title={m.cifra_cho ? "Trocar o .cho da cifra" : "Enviar .cho da cifra"}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs transition cursor-pointer ${
+                      m.cifra_cho
+                        ? "border-gold-600 text-gold-300 hover:bg-noir-800"
+                        : "border-noir-700 text-cream-muted hover:text-gold-300 hover:border-gold-600"
+                    } ${enviandoCifraId === m.id ? "opacity-50 pointer-events-none" : ""}`}
+                  >
+                    {enviandoCifraId === m.id ? (
+                      "⏳..."
+                    ) : (
+                      <>
+                        <Icone nome="anexo" className="w-3.5 h-3.5" />
+                        {m.cifra_cho ? "Trocar .cho" : ".cho"}
+                      </>
+                    )}
+                    <input
+                      type="file"
+                      accept=".cho,text/plain"
+                      className="hidden"
+                      onChange={(e) => {
+                        enviarCho(m, e.target.files?.[0]);
                         e.target.value = "";
                       }}
                     />
@@ -1268,8 +1324,8 @@ function AbaCifras() {
   const carregar = () =>
     supabase
       .from("musicas")
-      .select("id, nome, artista, estilo, cifra_path, cifra_paginas, cifra_versao, favorito")
-      .not("cifra_path", "is", null)
+      .select("id, nome, artista, estilo, cifra_path, cifra_paginas, cifra_versao, cifra_cho, favorito")
+      .or("cifra_path.not.is.null,cifra_cho.not.is.null")
       .order("nome")
       .order("artista")
       .then(({ data, error }) => {
@@ -1297,7 +1353,9 @@ function AbaCifras() {
   });
 
   const cliqueBaixar = () => {
-    if (!progresso.baixando) baixarCifrasEmCache(musicas);
+    // Só cifras em PDF precisam de cache offline — as em .cho já vêm
+    // completas na própria linha da música, sem arquivo separado pra baixar
+    if (!progresso.baixando) baixarCifrasEmCache(musicas.filter((m) => m.cifra_path));
     setModalAberto(true);
   };
 
@@ -1314,7 +1372,9 @@ function AbaCifras() {
   // Cifras enviadas antes dessa funcionalidade só têm o PDF — abrem devagar
   // porque o celular precisa renderizar o PDF na hora. Esse botão gera as
   // imagens pra elas também, sem precisar reenviar o PDF de novo.
-  const semImagens = musicas.filter((m) => !m.cifra_paginas || !m.cifra_versao);
+  // Só músicas com PDF entram aqui — cifras em .cho não têm imagem nenhuma
+  // pra gerar (o texto já abre instantâneo, sem PDF envolvido)
+  const semImagens = musicas.filter((m) => m.cifra_path && (!m.cifra_paginas || !m.cifra_versao));
 
   const reprocessarCifrasAntigas = async () => {
     if (semImagens.length === 0 || reprocessando) return;
@@ -1453,7 +1513,7 @@ function AbaCifras() {
           {visiveis.length === 0 && (
             <li className="py-4 text-cream-muted text-sm">
               {musicas.length === 0
-                ? "Nenhuma cifra enviada ainda. Envie os PDFs na aba Músicas (botão PDF)."
+                ? "Nenhuma cifra enviada ainda. Envie os PDFs ou .cho na aba Músicas (botões PDF / .cho)."
                 : "Nenhuma cifra encontrada com esse filtro."}
             </li>
           )}
@@ -2888,7 +2948,7 @@ function GerenciarPedidos({ onMudanca }) {
     supabase
       .from("musicas")
       .select("id, nome")
-      .not("cifra_path", "is", null)
+      .or("cifra_path.not.is.null,cifra_cho.not.is.null")
       .then(({ data, error }) => {
         if (error) return;
         const mapa = {};

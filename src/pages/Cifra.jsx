@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import * as pdfjs from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { supabase, supabaseConfigured } from "../lib/supabase";
+import { parseChordPro } from "../lib/chordpro";
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -63,10 +64,62 @@ const limparPaginas = (container) => {
   container.innerHTML = "";
 };
 
+// Uma linha de letra com acordes: cada segmento é um pedacinho de texto com,
+// no máximo, um acorde grudado no começo dele — renderizado como uma coluna
+// (acorde em cima, texto embaixo) pra manter o acorde alinhado com a sílaba
+// certa mesmo variando o tamanho da fonte com o zoom.
+function LinhaCho({ segmentos }) {
+  return (
+    <div className="flex flex-wrap items-end">
+      {segmentos.map((seg, i) => (
+        <span key={i} className="inline-flex flex-col items-start">
+          <span className="text-gold-400 font-semibold leading-none text-[0.72em] h-[1.3em] select-none">
+            {seg.chord || " "}
+          </span>
+          <span className="whitespace-pre leading-snug">{seg.texto || " "}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+// Cifra em ChordPro (texto), alternativa às imagens/PDF — mesma área de
+// rolagem e zoom (via fontSize no container pai), só troca o que tem dentro.
+function CifraChoView({ blocos }) {
+  return (
+    <div className="max-w-2xl mx-auto px-1 pb-4 text-cream">
+      {blocos.map((b, i) => {
+        if (b.tipo === "vazio") return <div key={i} className="h-4" />;
+        if (b.tipo === "meta") {
+          return (
+            <p key={i} className="text-cream-muted/70 text-[0.7em] italic mb-2">
+              {b.texto}
+            </p>
+          );
+        }
+        if (b.tipo === "secao") {
+          return (
+            <h3
+              key={i}
+              className="mt-6 mb-2 first:mt-0 text-gold-300 font-display uppercase tracking-wide text-[0.85em]"
+            >
+              {b.texto}
+            </h3>
+          );
+        }
+        return <LinhaCho key={i} segmentos={b.segmentos} />;
+      })}
+    </div>
+  );
+}
+
 export default function Cifra() {
   const { id } = useParams();
   const [sessao, setSessao] = useState(undefined); // undefined = verificando
   const [musica, setMusica] = useState(null);
+  // Blocos já parseados do .cho — null quando a cifra é PDF/imagens (ou
+  // ainda não carregou), preenchido só quando a música tem cifra_cho
+  const [choBlocos, setChoBlocos] = useState(null);
   // id da entrada em "sugestoes" (aba Aprender) enquanto a música está
   // marcada para revisão; null quando não está marcada
   const [revisaoId, setRevisaoId] = useState(null);
@@ -304,6 +357,7 @@ export default function Cifra() {
     let timeoutId;
     const containerAtual = paginasRef.current;
     setErro("");
+    setChoBlocos(null); // limpa a cifra em texto da música anterior, se houver
 
     // Baixa e renderiza o PDF direto — usado tanto pra cifras antigas (sem
     // imagens pré-geradas) quanto como reserva, se as imagens prontas de
@@ -346,7 +400,7 @@ export default function Cifra() {
     (async () => {
       const { data: m, error } = await supabase
         .from("musicas")
-        .select("id, nome, artista, cifra_path, cifra_paginas, cifra_versao, favorito")
+        .select("id, nome, artista, cifra_path, cifra_paginas, cifra_versao, cifra_cho, favorito")
         .eq("id", id)
         .single();
 
@@ -369,12 +423,20 @@ export default function Cifra() {
           if (!cancelado) setRevisaoId(rev?.id ?? null);
         });
 
-      if (!m.cifra_path) {
-        setErro("Essa música ainda não tem cifra. Envie o PDF na aba Músicas.");
+      if (!m.cifra_path && !m.cifra_cho) {
+        setErro("Essa música ainda não tem cifra. Envie o PDF ou o .cho na aba Músicas.");
         setMusica(m);
         return;
       }
       setMusica(m);
+
+      if (m.cifra_cho) {
+        // Cifra em ChordPro: não tem PDF pra renderizar, é só parsear o
+        // texto e exibir — abre instantâneo, sem pdf.js nenhum
+        setChoBlocos(parseChordPro(m.cifra_cho).blocos);
+        setRenderizando(false);
+        return;
+      }
 
       if (m.cifra_paginas > 0) {
         // Cifra já tem as páginas convertidas em imagem (geradas no upload,
@@ -795,7 +857,13 @@ export default function Cifra() {
                   : "Carregando cifra..."}
               </p>
             )}
-            <div ref={paginasRef} className="mx-auto" style={{ width: `${zoom * 100}%` }} />
+            {choBlocos ? (
+              <div style={{ fontSize: `${zoom}rem` }}>
+                <CifraChoView blocos={choBlocos} />
+              </div>
+            ) : (
+              <div ref={paginasRef} className="mx-auto" style={{ width: `${zoom * 100}%` }} />
+            )}
             <div className="h-[40vh]" /> {/* respiro para terminar a música */}
           </>
         )}

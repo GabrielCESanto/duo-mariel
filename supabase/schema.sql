@@ -202,6 +202,13 @@ alter table public.musicas add column if not exists cifra_paginas integer;
 -- tentativa que falhou no meio) em vez de buscar a nova.
 alter table public.musicas add column if not exists cifra_versao bigint;
 
+-- Cifra em ChordPro (texto puro, com acordes entre colchetes embutidos na
+-- letra) — alternativa ao PDF, guardada direto na linha (arquivo pequeno,
+-- não precisa de Storage). Quando preenchida, Cifra.jsx renderiza o texto
+-- em vez do PDF/imagens; as duas colunas podem conviver (ex.: durante a
+-- migração de uma cifra de PDF para .cho).
+alter table public.musicas add column if not exists cifra_cho text;
+
 -- Bucket público para leitura (URLs estáveis = funciona offline no PWA);
 -- escrita somente autenticada.
 insert into storage.buckets (id, name, public)

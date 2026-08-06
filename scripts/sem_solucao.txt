@@ -1,0 +1,12 @@
+Estas 8 musicas nao tem acorde no PDF de origem (sao impressoes de site de
+letra, tipo letras.mus.br, que nunca tiveram cifra) -- nao tem solucao por
+script/OCR, so trocando por um PDF de cifra de verdade (ex.: Cifra Club):
+
+Blackbird.pdf
+Coisa Linda.pdf
+Eu e Você Sempre.pdf
+Jackie Tequila.pdf
+Neon.pdf
+Pra Você Dar o Nome.pdf
+Sampa.pdf
+What More Can I Say.pdf
