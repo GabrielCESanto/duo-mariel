@@ -197,6 +197,7 @@ const ABAS_OUTROS = [
   ["gorjeta", "Gorjeta"],
   ["musicas", "Músicas"],
   ["ocultar", "Ocultar"],
+  ["playlists", "Playlists"],
   ["videos", "Vídeos"],
 ];
 
@@ -364,9 +365,49 @@ function Icone({ nome, className = "w-5 h-5" }) {
           <line x1="8" y1="12" x2="16" y2="12" />
         </svg>
       );
+    case "playlists":
+      return (
+        <svg {...props}>
+          <circle cx="4" cy="6" r="1.3" fill="currentColor" stroke="none" />
+          <line x1="8" y1="6" x2="20" y2="6" />
+          <circle cx="4" cy="12" r="1.3" fill="currentColor" stroke="none" />
+          <line x1="8" y1="12" x2="20" y2="12" />
+          <circle cx="4" cy="18" r="1.3" fill="currentColor" stroke="none" />
+          <line x1="8" y1="18" x2="16" y2="18" />
+        </svg>
+      );
     default:
       return null;
   }
+}
+
+// Checkbox com aparência própria (noir + dourado) — o checkbox nativo do
+// navegador (caixa branca, marca de sistema) destoa muito da paleta escura
+// do site. Continua sendo um <input type="checkbox"> de verdade por baixo
+// (mantém teclado, leitor de tela e clique no <label> funcionando), só
+// escondido visualmente — o quadrado e o ✓ por cima são desenhados à mão,
+// no mesmo estilo de traço fino dos outros ícones.
+function CaixaMarcar({ checked, onChange, className = "" }) {
+  return (
+    <span className={`relative inline-flex shrink-0 w-5 h-5 ${className}`}>
+      <input type="checkbox" className="peer sr-only" checked={checked} onChange={onChange} />
+      <span
+        className="block w-5 h-5 rounded-md border border-noir-600 bg-noir-900 transition-colors
+          peer-checked:bg-gold-500 peer-checked:border-gold-500
+          peer-focus-visible:ring-2 peer-focus-visible:ring-gold-500/50"
+      />
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        strokeWidth={3.5}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="pointer-events-none absolute inset-0 m-auto w-3 h-3 stroke-noir-900 opacity-0 peer-checked:opacity-100 transition-opacity"
+      >
+        <polyline points="20 6 9 17 4 12" />
+      </svg>
+    </span>
+  );
 }
 
 function Painel() {
@@ -531,6 +572,7 @@ function Painel() {
       {aba === "videos" && <GerenciarVideos />}
       {aba === "gorjeta" && <AbaGorjeta />}
       {aba === "ocultar" && <AbaOcultar />}
+      {aba === "playlists" && <AbaPlaylists />}
       {aba === "pedidos" && <GerenciarPedidos onMudanca={contarPendentes} />}
       {aba === "acessos" && <AbaAcessos />}
     </div>
@@ -2623,9 +2665,7 @@ function AbaGorjeta() {
 
       <form onSubmit={salvar} className="space-y-4">
         <label className="flex items-center gap-2.5 text-sm text-cream cursor-pointer">
-          <input
-            type="checkbox"
-            className="w-5 h-5 accent-gold-500 rounded shrink-0"
+          <CaixaMarcar
             checked={dados.ativo}
             onChange={(e) => setDados({ ...dados, ativo: e.target.checked })}
           />
@@ -2709,12 +2749,7 @@ function ListaSelecao({ titulo, opcoes, selecionados, aoAlternar, comBusca }) {
             key={o.valor}
             className="flex items-center gap-2 text-sm text-cream px-1.5 py-1.5 rounded-lg hover:bg-noir-800 cursor-pointer"
           >
-            <input
-              type="checkbox"
-              className="w-4 h-4 accent-gold-500 rounded shrink-0"
-              checked={selecionados.has(o.valor)}
-              onChange={() => aoAlternar(o.valor)}
-            />
+            <CaixaMarcar checked={selecionados.has(o.valor)} onChange={() => aoAlternar(o.valor)} />
             <span className="truncate">{o.rotulo}</span>
           </label>
         ))}
@@ -2945,12 +2980,14 @@ function AbaOcultar() {
               opcoes={opcoesEstilos}
               selecionados={form.estilos}
               aoAlternar={alternarNoSet("estilos")}
+              comBusca
             />
             <ListaSelecao
               titulo="Artistas"
               opcoes={opcoesArtistas}
               selecionados={form.artistas}
               aoAlternar={alternarNoSet("artistas")}
+              comBusca
             />
             <ListaSelecao
               titulo="Músicas"
@@ -3048,6 +3085,312 @@ function AbaOcultar() {
           </ul>
         )}
       </div>
+    </div>
+  );
+}
+
+/* ------------------------- PLAYLISTS ------------------------- */
+// Roteiros de show com ordem definida — só o admin vê (não é uma
+// funcionalidade pública). musicas_ids é um array ordenado: a posição no
+// array é a ordem de execução.
+function AbaPlaylists() {
+  const [musicas, setMusicas] = useState([]);
+  const [playlists, setPlaylists] = useState([]);
+  const [carregando, setCarregando] = useState(true);
+  const [status, setStatus] = useState("");
+  const [abertaId, setAbertaId] = useState(null);
+  const [novoNome, setNovoNome] = useState("");
+  const [buscaAdicionar, setBuscaAdicionar] = useState("");
+  const [nomeEditando, setNomeEditando] = useState("");
+
+  const carregar = async () => {
+    setCarregando(true);
+    const [musicasRes, playlistsRes] = await Promise.all([
+      supabase.from("musicas").select("id, nome, artista, estilo").order("nome"),
+      supabase.from("playlists").select("*").order("nome"),
+    ]);
+    if (!musicasRes.error) setMusicas(musicasRes.data ?? []);
+    if (!playlistsRes.error) setPlaylists(playlistsRes.data ?? []);
+    setCarregando(false);
+  };
+
+  useEffect(() => {
+    carregar();
+  }, []);
+
+  const musicaPorId = new Map(musicas.map((m) => [m.id, m]));
+  const playlistAberta = playlists.find((p) => p.id === abertaId) ?? null;
+
+  const abrirPlaylist = (p) => {
+    setAbertaId(p.id);
+    setNomeEditando(p.nome);
+    setBuscaAdicionar("");
+  };
+
+  const criarPlaylist = async (e) => {
+    e.preventDefault();
+    const nome = novoNome.trim();
+    if (!nome) return;
+
+    setStatus("⏳ Criando...");
+    const { data, error } = await supabase
+      .from("playlists")
+      .insert({ nome, musicas_ids: [] })
+      .select()
+      .single();
+
+    if (error) {
+      console.error(error);
+      setStatus("❌ Erro ao criar.");
+      return;
+    }
+    setStatus("");
+    setNovoNome("");
+    setPlaylists((ps) => [...ps, data].sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR")));
+    abrirPlaylist(data);
+  };
+
+  const excluirPlaylist = async (p) => {
+    if (!window.confirm(`Excluir a playlist "${p.nome}"?`)) return;
+    const { error } = await supabase.from("playlists").delete().eq("id", p.id);
+    if (error) {
+      console.error(error);
+      setStatus("❌ Erro ao excluir.");
+      return;
+    }
+    if (abertaId === p.id) setAbertaId(null);
+    carregar();
+  };
+
+  // Persiste a nova ordem (ou lista) de músicas — atualiza o estado local
+  // na hora (otimista) pra reordenar parecer instantâneo, e recarrega tudo
+  // se o servidor recusar, pra não deixar a tela mentindo sobre o que foi
+  // salvo de verdade
+  const salvarMusicas = async (playlistId, novaLista) => {
+    setPlaylists((ps) =>
+      ps.map((p) => (p.id === playlistId ? { ...p, musicas_ids: novaLista } : p))
+    );
+    const { error } = await supabase
+      .from("playlists")
+      .update({ musicas_ids: novaLista })
+      .eq("id", playlistId);
+    if (error) {
+      console.error(error);
+      setStatus("❌ Erro ao salvar — recarregando.");
+      carregar();
+    }
+  };
+
+  const renomear = async () => {
+    const nome = nomeEditando.trim();
+    if (!playlistAberta || !nome || nome === playlistAberta.nome) return;
+    setPlaylists((ps) => ps.map((p) => (p.id === playlistAberta.id ? { ...p, nome } : p)));
+    const { error } = await supabase
+      .from("playlists")
+      .update({ nome })
+      .eq("id", playlistAberta.id);
+    if (error) {
+      console.error(error);
+      setStatus("❌ Erro ao renomear.");
+      carregar();
+    }
+  };
+
+  const adicionarMusica = (musicaId) => {
+    if (!playlistAberta || playlistAberta.musicas_ids.includes(musicaId)) return;
+    salvarMusicas(playlistAberta.id, [...playlistAberta.musicas_ids, musicaId]);
+  };
+
+  const removerMusica = (musicaId) => {
+    if (!playlistAberta) return;
+    salvarMusicas(
+      playlistAberta.id,
+      playlistAberta.musicas_ids.filter((id) => id !== musicaId)
+    );
+  };
+
+  const moverMusica = (indice, direcao) => {
+    if (!playlistAberta) return;
+    const alvo = indice + direcao;
+    const lista = playlistAberta.musicas_ids;
+    if (alvo < 0 || alvo >= lista.length) return;
+    const nova = [...lista];
+    [nova[indice], nova[alvo]] = [nova[alvo], nova[indice]];
+    salvarMusicas(playlistAberta.id, nova);
+  };
+
+  const musicasDisponiveis = playlistAberta
+    ? musicas.filter((m) => {
+        if (playlistAberta.musicas_ids.includes(m.id)) return false;
+        const q = buscaAdicionar.trim().toLowerCase();
+        if (!q) return true;
+        return `${m.nome} ${m.artista}`.toLowerCase().includes(q);
+      })
+    : [];
+
+  if (carregando) return <p className="text-cream-muted text-sm py-4">Carregando...</p>;
+
+  return (
+    <div className="space-y-6">
+      {/* Playlists salvas */}
+      <div className="border border-noir-700 rounded-2xl p-5 bg-noir-900/50">
+        <h2 className="section-title text-sm mb-4">Playlists ({playlists.length})</h2>
+
+        <form onSubmit={criarPlaylist} className="flex gap-2 mb-4">
+          <input
+            className="input-noir"
+            placeholder="Nome da nova playlist (ex.: Repertório do show de sábado)"
+            value={novoNome}
+            onChange={(e) => setNovoNome(e.target.value)}
+          />
+          <button type="submit" className="btn-gold px-5 py-2.5 rounded-xl text-sm shrink-0">
+            Criar
+          </button>
+        </form>
+
+        {status && <p className="text-sm text-cream-muted mb-3">{status}</p>}
+
+        {playlists.length === 0 ? (
+          <p className="text-cream-muted text-sm py-2">Nenhuma playlist salva ainda.</p>
+        ) : (
+          <ul className="divide-y divide-noir-800">
+            {playlists.map((p) => (
+              <li key={p.id} className="py-3 flex items-center justify-between gap-3">
+                <button
+                  onClick={() => abrirPlaylist(p)}
+                  className={`min-w-0 flex-1 text-left ${
+                    abertaId === p.id ? "text-gold-300" : "text-cream hover:text-gold-300"
+                  } transition`}
+                >
+                  <p className="truncate">{p.nome}</p>
+                  <p className="text-cream-muted text-xs mt-0.5">
+                    {p.musicas_ids?.length ?? 0} música(s)
+                  </p>
+                </button>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={() => abrirPlaylist(p)}
+                    className="px-3 py-1.5 rounded-lg border border-noir-700 text-xs text-cream-muted hover:text-gold-300 hover:border-gold-600 transition"
+                  >
+                    {abertaId === p.id ? "Editando" : "Abrir"}
+                  </button>
+                  <button
+                    onClick={() => excluirPlaylist(p)}
+                    className="px-3 py-1.5 rounded-lg border border-noir-700 text-xs text-cream-muted hover:text-red-400 hover:border-red-900 transition"
+                  >
+                    Excluir
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {/* Editor da playlist aberta */}
+      {playlistAberta && (
+        <div className="border border-noir-700 rounded-2xl p-5 bg-noir-900/50">
+          <div className="flex items-center gap-2 mb-4">
+            <input
+              className="input-noir"
+              value={nomeEditando}
+              onChange={(e) => setNomeEditando(e.target.value)}
+              onBlur={renomear}
+            />
+            <button
+              onClick={() => setAbertaId(null)}
+              className="shrink-0 px-4 py-2.5 rounded-xl border border-noir-700 text-sm text-cream-muted hover:text-cream transition"
+            >
+              Fechar
+            </button>
+          </div>
+
+          <div className="grid gap-5 sm:grid-cols-2">
+            {/* Ordem da playlist */}
+            <div>
+              <p className="text-xs uppercase tracking-wider text-cream-muted mb-2">
+                Ordem ({playlistAberta.musicas_ids.length})
+              </p>
+              {playlistAberta.musicas_ids.length === 0 ? (
+                <p className="text-cream-muted text-sm border border-noir-800 rounded-xl p-4">
+                  Nenhuma música ainda — adicione ao lado.
+                </p>
+              ) : (
+                <ol className="border border-noir-800 rounded-xl divide-y divide-noir-800 max-h-96 overflow-y-auto">
+                  {playlistAberta.musicas_ids.map((id, i) => {
+                    const m = musicaPorId.get(id);
+                    return (
+                      <li key={id} className="flex items-center gap-2 px-3 py-2">
+                        <span className="text-cream-muted text-xs w-5 shrink-0 text-right">
+                          {i + 1}.
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-sm text-cream">
+                          {m ? `${m.nome} — ${m.artista}` : "(música removida do repertório)"}
+                        </span>
+                        <button
+                          onClick={() => moverMusica(i, -1)}
+                          disabled={i === 0}
+                          aria-label="Mover para cima"
+                          className="shrink-0 w-7 h-7 rounded-md border border-noir-700 text-cream-muted text-xs hover:text-gold-300 hover:border-gold-600 transition disabled:opacity-30 disabled:pointer-events-none"
+                        >
+                          ↑
+                        </button>
+                        <button
+                          onClick={() => moverMusica(i, 1)}
+                          disabled={i === playlistAberta.musicas_ids.length - 1}
+                          aria-label="Mover para baixo"
+                          className="shrink-0 w-7 h-7 rounded-md border border-noir-700 text-cream-muted text-xs hover:text-gold-300 hover:border-gold-600 transition disabled:opacity-30 disabled:pointer-events-none"
+                        >
+                          ↓
+                        </button>
+                        <button
+                          onClick={() => removerMusica(id)}
+                          aria-label="Remover da playlist"
+                          className="shrink-0 w-7 h-7 rounded-md border border-noir-700 text-cream-muted text-xs hover:text-red-400 hover:border-red-900 transition"
+                        >
+                          ✕
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ol>
+              )}
+            </div>
+
+            {/* Adicionar músicas do repertório */}
+            <div>
+              <p className="text-xs uppercase tracking-wider text-cream-muted mb-2">
+                Adicionar do repertório
+              </p>
+              <input
+                className="input-noir text-sm mb-2"
+                placeholder="Buscar música ou artista..."
+                value={buscaAdicionar}
+                onChange={(e) => setBuscaAdicionar(e.target.value)}
+              />
+              <div className="max-h-96 overflow-y-auto border border-noir-800 rounded-xl divide-y divide-noir-800">
+                {musicasDisponiveis.map((m) => (
+                  <button
+                    key={m.id}
+                    onClick={() => adicionarMusica(m.id)}
+                    className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left hover:bg-noir-800 transition"
+                  >
+                    <span className="min-w-0 truncate text-sm text-cream">
+                      {m.nome} — {m.artista}
+                    </span>
+                    <Icone nome="mais" className="w-4 h-4 text-gold-400 shrink-0" />
+                  </button>
+                ))}
+                {musicasDisponiveis.length === 0 && (
+                  <p className="text-cream-muted text-sm px-3 py-4">
+                    {musicas.length === 0 ? "Repertório vazio." : "Nada encontrado."}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

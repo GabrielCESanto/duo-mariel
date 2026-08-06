@@ -403,6 +403,42 @@ where a.id = true;
 
 grant select on public.ocultos_ativos to anon, authenticated;
 
+-- ---------- TABELA: playlists (setlists com ordem definida) ----------
+-- musicas_ids é um array ORDENADO — a posição no array é a ordem de
+-- execução. Ferramenta só do admin (roteiro de show), sem leitura pública.
+create table if not exists public.playlists (
+  id uuid primary key default gen_random_uuid(),
+  nome text not null,
+  musicas_ids uuid[] not null default '{}',
+  created_at timestamptz not null default now()
+);
+
+alter table public.playlists enable row level security;
+
+drop policy if exists "playlists: select autenticado" on public.playlists;
+create policy "playlists: select autenticado"
+  on public.playlists for select
+  to authenticated
+  using (true);
+
+drop policy if exists "playlists: insert autenticado" on public.playlists;
+create policy "playlists: insert autenticado"
+  on public.playlists for insert
+  to authenticated
+  with check (true);
+
+drop policy if exists "playlists: update autenticado" on public.playlists;
+create policy "playlists: update autenticado"
+  on public.playlists for update
+  to authenticated
+  using (true);
+
+drop policy if exists "playlists: delete autenticado" on public.playlists;
+create policy "playlists: delete autenticado"
+  on public.playlists for delete
+  to authenticated
+  using (true);
+
 -- ---------- (Opcional) Repertório inicial ----------
 -- insert into public.musicas (nome, artista, estilo) values
 --   ('Trevo (Tu)', 'Anavitória', 'MPB'),
