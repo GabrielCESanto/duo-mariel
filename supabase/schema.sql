@@ -1,6 +1,12 @@
 -- =============================================================
 -- Schema do Site Duo Mariel
 -- Execute no SQL Editor do Supabase (Dashboard > SQL Editor)
+--
+-- O arquivo inteiro é seguro pra rodar de novo a qualquer momento (tabelas,
+-- colunas e policies só são criadas "se não existir" — cada "create policy"
+-- vem com um "drop policy if exists" antes). Sempre que este arquivo
+-- ganhar uma seção nova, é só colar e rodar ele inteiro de novo; não
+-- precisa garimpar só o trecho novo.
 -- =============================================================
 
 -- ---------- TABELA: musicas ----------
@@ -18,21 +24,25 @@ alter table public.musicas add column if not exists favorito boolean not null de
 alter table public.musicas enable row level security;
 
 -- Qualquer visitante pode LER o repertório
+drop policy if exists "musicas: leitura publica" on public.musicas;
 create policy "musicas: leitura publica"
   on public.musicas for select
   using (true);
 
 -- Apenas usuários logados (você e sua parceira) podem alterar
+drop policy if exists "musicas: insert autenticado" on public.musicas;
 create policy "musicas: insert autenticado"
   on public.musicas for insert
   to authenticated
   with check (true);
 
+drop policy if exists "musicas: update autenticado" on public.musicas;
 create policy "musicas: update autenticado"
   on public.musicas for update
   to authenticated
   using (true);
 
+drop policy if exists "musicas: delete autenticado" on public.musicas;
 create policy "musicas: delete autenticado"
   on public.musicas for delete
   to authenticated
@@ -52,16 +62,19 @@ alter table public.pedidos enable row level security;
 -- Visitantes NÃO acessam a tabela diretamente:
 -- a inserção é feita pela Edge Function (service role, ignora RLS).
 -- Somente usuários logados leem/gerenciam os pedidos.
+drop policy if exists "pedidos: select autenticado" on public.pedidos;
 create policy "pedidos: select autenticado"
   on public.pedidos for select
   to authenticated
   using (true);
 
+drop policy if exists "pedidos: update autenticado" on public.pedidos;
 create policy "pedidos: update autenticado"
   on public.pedidos for update
   to authenticated
   using (true);
 
+drop policy if exists "pedidos: delete autenticado" on public.pedidos;
 create policy "pedidos: delete autenticado"
   on public.pedidos for delete
   to authenticated
@@ -86,21 +99,25 @@ alter table public.sugestoes enable row level security;
 -- Visitantes NÃO acessam a tabela diretamente:
 -- a inserção é feita pela Edge Function (service role, ignora RLS).
 -- Somente usuários logados leem/gerenciam as sugestões.
+drop policy if exists "sugestoes: select autenticado" on public.sugestoes;
 create policy "sugestoes: select autenticado"
   on public.sugestoes for select
   to authenticated
   using (true);
 
+drop policy if exists "sugestoes: insert autenticado" on public.sugestoes;
 create policy "sugestoes: insert autenticado"
   on public.sugestoes for insert
   to authenticated
   with check (true);
 
+drop policy if exists "sugestoes: update autenticado" on public.sugestoes;
 create policy "sugestoes: update autenticado"
   on public.sugestoes for update
   to authenticated
   using (true);
 
+drop policy if exists "sugestoes: delete autenticado" on public.sugestoes;
 create policy "sugestoes: delete autenticado"
   on public.sugestoes for delete
   to authenticated
@@ -127,6 +144,7 @@ alter table public.eventos enable row level security;
 
 -- Qualquer visitante pode LER a agenda, mas SEM as colunas privadas
 -- (cache e duracao ficam visíveis apenas para usuários logados)
+drop policy if exists "eventos: leitura publica" on public.eventos;
 create policy "eventos: leitura publica"
   on public.eventos for select
   using (true);
@@ -135,16 +153,19 @@ revoke select on table public.eventos from anon;
 grant select (id, titulo, local, data, hora, observacao)
   on table public.eventos to anon;
 
+drop policy if exists "eventos: insert autenticado" on public.eventos;
 create policy "eventos: insert autenticado"
   on public.eventos for insert
   to authenticated
   with check (true);
 
+drop policy if exists "eventos: update autenticado" on public.eventos;
 create policy "eventos: update autenticado"
   on public.eventos for update
   to authenticated
   using (true);
 
+drop policy if exists "eventos: delete autenticado" on public.eventos;
 create policy "eventos: delete autenticado"
   on public.eventos for delete
   to authenticated
@@ -166,20 +187,24 @@ alter table public.videos add column if not exists instagram_id text;
 alter table public.videos enable row level security;
 
 -- Qualquer visitante pode LER os vídeos
+drop policy if exists "videos: leitura publica" on public.videos;
 create policy "videos: leitura publica"
   on public.videos for select
   using (true);
 
+drop policy if exists "videos: insert autenticado" on public.videos;
 create policy "videos: insert autenticado"
   on public.videos for insert
   to authenticated
   with check (true);
 
+drop policy if exists "videos: update autenticado" on public.videos;
 create policy "videos: update autenticado"
   on public.videos for update
   to authenticated
   using (true);
 
+drop policy if exists "videos: delete autenticado" on public.videos;
 create policy "videos: delete autenticado"
   on public.videos for delete
   to authenticated
@@ -215,16 +240,19 @@ insert into storage.buckets (id, name, public)
 values ('cifras', 'cifras', true)
 on conflict (id) do nothing;
 
+drop policy if exists "cifras: upload autenticado" on storage.objects;
 create policy "cifras: upload autenticado"
   on storage.objects for insert
   to authenticated
   with check (bucket_id = 'cifras');
 
+drop policy if exists "cifras: update autenticado" on storage.objects;
 create policy "cifras: update autenticado"
   on storage.objects for update
   to authenticated
   using (bucket_id = 'cifras');
 
+drop policy if exists "cifras: delete autenticado" on storage.objects;
 create policy "cifras: delete autenticado"
   on storage.objects for delete
   to authenticated
@@ -253,10 +281,12 @@ alter table public.gorjeta enable row level security;
 
 -- Qualquer visitante lê (precisa ver se está ativo e os dados do pix) —
 -- só usuários logados alteram
+drop policy if exists "gorjeta: leitura publica" on public.gorjeta;
 create policy "gorjeta: leitura publica"
   on public.gorjeta for select
   using (true);
 
+drop policy if exists "gorjeta: update autenticado" on public.gorjeta;
 create policy "gorjeta: update autenticado"
   on public.gorjeta for update
   to authenticated
@@ -267,16 +297,19 @@ insert into storage.buckets (id, name, public)
 values ('gorjeta', 'gorjeta', true)
 on conflict (id) do nothing;
 
+drop policy if exists "gorjeta: upload autenticado" on storage.objects;
 create policy "gorjeta: upload autenticado"
   on storage.objects for insert
   to authenticated
   with check (bucket_id = 'gorjeta');
 
+drop policy if exists "gorjeta: update objeto autenticado" on storage.objects;
 create policy "gorjeta: update objeto autenticado"
   on storage.objects for update
   to authenticated
   using (bucket_id = 'gorjeta');
 
+drop policy if exists "gorjeta: delete objeto autenticado" on storage.objects;
 create policy "gorjeta: delete objeto autenticado"
   on storage.objects for delete
   to authenticated
@@ -298,21 +331,25 @@ create table if not exists public.perfis_ocultar (
 
 alter table public.perfis_ocultar enable row level security;
 
+drop policy if exists "perfis_ocultar: select autenticado" on public.perfis_ocultar;
 create policy "perfis_ocultar: select autenticado"
   on public.perfis_ocultar for select
   to authenticated
   using (true);
 
+drop policy if exists "perfis_ocultar: insert autenticado" on public.perfis_ocultar;
 create policy "perfis_ocultar: insert autenticado"
   on public.perfis_ocultar for insert
   to authenticated
   with check (true);
 
+drop policy if exists "perfis_ocultar: update autenticado" on public.perfis_ocultar;
 create policy "perfis_ocultar: update autenticado"
   on public.perfis_ocultar for update
   to authenticated
   using (true);
 
+drop policy if exists "perfis_ocultar: delete autenticado" on public.perfis_ocultar;
 create policy "perfis_ocultar: delete autenticado"
   on public.perfis_ocultar for delete
   to authenticated
@@ -333,11 +370,13 @@ insert into public.ocultar_ativo (id) values (true) on conflict (id) do nothing;
 
 alter table public.ocultar_ativo enable row level security;
 
+drop policy if exists "ocultar_ativo: select autenticado" on public.ocultar_ativo;
 create policy "ocultar_ativo: select autenticado"
   on public.ocultar_ativo for select
   to authenticated
   using (true);
 
+drop policy if exists "ocultar_ativo: update autenticado" on public.ocultar_ativo;
 create policy "ocultar_ativo: update autenticado"
   on public.ocultar_ativo for update
   to authenticated
