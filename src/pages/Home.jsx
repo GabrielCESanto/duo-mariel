@@ -4,9 +4,11 @@ import { Link } from "react-router-dom";
 import { TAGLINE, SOBRE } from "../config";
 import { useMusicas } from "../hooks/useMusicas";
 import { useVideos } from "../hooks/useVideos";
+import { useGorjeta } from "../hooks/useGorjeta";
 import SocialLinks from "../components/SocialLinks";
 import PedidoModal from "../components/PedidoModal";
 import SugestaoModal from "../components/SugestaoModal";
+import { GorjetaModal } from "../components/Gorjeta";
 import Agenda from "../components/Agenda";
 
 const BASE = import.meta.env.BASE_URL;
@@ -33,12 +35,14 @@ function IconeMais({ className = "w-4 h-4" }) {
 export default function Home() {
   const { musicas, carregando } = useMusicas();
   const { videos } = useVideos();
+  const { gorjeta } = useGorjeta();
 
   const [busca, setBusca] = useState("");
   const [filtroArtista, setFiltroArtista] = useState("Todos");
   const [filtroEstilo, setFiltroEstilo] = useState("Todos");
   const [pedidoAtual, setPedidoAtual] = useState(null);
   const [sugestaoAberta, setSugestaoAberta] = useState(false);
+  const [gorjetaAberta, setGorjetaAberta] = useState(false);
 
   // --- Preview de 30s (iTunes) ---
   const audioRef = useRef(null);
@@ -249,6 +253,16 @@ export default function Home() {
           </div>
         </section>
 
+        {/* GORJETA — sutil, só aparece quando ativada no admin */}
+        {gorjeta?.ativo && (
+          <button
+            onClick={() => setGorjetaAberta(true)}
+            className="mt-4 w-full h-12 rounded-xl border border-noir-800 text-cream-muted text-sm italic hover:border-gold-700 hover:text-gold-300 transition"
+          >
+            Gostou do show? Uma gorjeta é sempre bem-vinda 💛
+          </button>
+        )}
+
         {/* AGENDA */}
         <Agenda />
 
@@ -323,11 +337,16 @@ export default function Home() {
         </footer>
       </div>
 
-      <PedidoModal pedido={pedidoAtual} onFechar={() => setPedidoAtual(null)} />
+      <PedidoModal pedido={pedidoAtual} gorjeta={gorjeta} onFechar={() => setPedidoAtual(null)} />
       <SugestaoModal
         aberto={sugestaoAberta}
         musicaInicial={busca.trim()}
         onFechar={() => setSugestaoAberta(false)}
+      />
+      <GorjetaModal
+        aberto={gorjetaAberta}
+        gorjeta={gorjeta}
+        onFechar={() => setGorjetaAberta(false)}
       />
     </div>
   );

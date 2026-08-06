@@ -235,6 +235,53 @@ create policy "cifras: delete autenticado"
 alter table public.sugestoes add column if not exists ok_gabs boolean not null default false;
 alter table public.sugestoes add column if not exists ok_mari boolean not null default false;
 
+-- ---------- TABELA: gorjeta (config única — pix + qrcode + liga/desliga) ----------
+-- Linha única (id sempre true) com os dados de gorjeta configurados pela
+-- dupla — pix_qrcode_path aponta pro bucket "gorjeta" no Storage. Quando
+-- ativo=true, o site mostra o convite de gorjeta no modal de pedido e o
+-- botão na página principal.
+create table if not exists public.gorjeta (
+  id boolean primary key default true,
+  pix_chave text,
+  pix_qrcode_path text,
+  ativo boolean not null default false,
+  constraint gorjeta_singleton check (id)
+);
+insert into public.gorjeta (id) values (true) on conflict (id) do nothing;
+
+alter table public.gorjeta enable row level security;
+
+-- Qualquer visitante lê (precisa ver se está ativo e os dados do pix) —
+-- só usuários logados alteram
+create policy "gorjeta: leitura publica"
+  on public.gorjeta for select
+  using (true);
+
+create policy "gorjeta: update autenticado"
+  on public.gorjeta for update
+  to authenticated
+  using (true);
+
+-- Bucket público para o QR code (mesma lógica do bucket "cifras")
+insert into storage.buckets (id, name, public)
+values ('gorjeta', 'gorjeta', true)
+on conflict (id) do nothing;
+
+create policy "gorjeta: upload autenticado"
+  on storage.objects for insert
+  to authenticated
+  with check (bucket_id = 'gorjeta');
+
+create policy "gorjeta: update objeto autenticado"
+  on storage.objects for update
+  to authenticated
+  using (bucket_id = 'gorjeta');
+
+create policy "gorjeta: delete objeto autenticado"
+  on storage.objects for delete
+  to authenticated
+  using (bucket_id = 'gorjeta');
+
 -- ---------- (Opcional) Repertório inicial ----------
 -- insert into public.musicas (nome, artista, estilo) values
 --   ('Trevo (Tu)', 'Anavitória', 'MPB'),

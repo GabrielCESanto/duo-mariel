@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { PEDIDO_FUNCTION_URL, anonKey, supabaseConfigured } from "../lib/supabase";
+import { GorjetaConteudo } from "./Gorjeta";
 
-export default function PedidoModal({ pedido, onFechar }) {
+export default function PedidoModal({ pedido, gorjeta, onFechar }) {
   const [mensagem, setMensagem] = useState("");
   const [status, setStatus] = useState("");
   const [enviando, setEnviando] = useState(false);
@@ -38,7 +39,10 @@ export default function PedidoModal({ pedido, onFechar }) {
 
       setStatus("✅ Pedido enviado!");
       setEnviado(true);
-      setTimeout(onFechar, 900);
+      // Com gorjeta ativa, o modal fica aberto numa última etapa (convite
+      // sutil à gorjeta) em vez de fechar sozinho — sem isso, quem quisesse
+      // ver o pix não teria tempo de reagir antes do fechamento automático
+      if (!gorjeta?.ativo) setTimeout(onFechar, 900);
     } catch (e) {
       console.error("Erro ao enviar pedido:", e);
       setStatus("❌ Falha ao enviar. Tente novamente.");
@@ -46,6 +50,38 @@ export default function PedidoModal({ pedido, onFechar }) {
       setEnviando(false);
     }
   };
+
+  // Última etapa, só quando a gorjeta está ativa: em vez de fechar sozinho,
+  // o modal troca o formulário por um convite sutil (a mensagem "Enviado ✓"
+  // já apareceu no botão antes de trocar a tela inteira)
+  if (enviado && gorjeta?.ativo) {
+    return (
+      <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div className="w-full max-w-md rounded-2xl border border-noir-700 bg-noir-900 p-6">
+          <div className="flex items-start justify-between gap-4">
+            <h3 className="section-title text-base">Pedido enviado! 🎶</h3>
+            <button
+              onClick={onFechar}
+              aria-label="Fechar"
+              className="text-cream-muted hover:text-cream text-lg leading-none"
+            >
+              ✕
+            </button>
+          </div>
+
+          <div className="mt-4">
+            <GorjetaConteudo gorjeta={gorjeta} />
+          </div>
+
+          <div className="mt-5 flex justify-end">
+            <button className="btn-gold px-5 py-2 rounded-xl text-sm" onClick={onFechar}>
+              Fechar
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-50 p-4">

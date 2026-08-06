@@ -206,6 +206,7 @@ const ABAS_OUTROS = [
   ["afinador", "Afinador"],
   ["agenda", "Agenda"],
   ["aprender", "Aprender"],
+  ["gorjeta", "Gorjeta"],
   ["musicas", "Músicas"],
   ["videos", "Vídeos"],
 ];
@@ -350,6 +351,12 @@ function Icone({ nome, className = "w-5 h-5" }) {
         <svg {...props}>
           <path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 011 1v10a1 1 0 01-1 1H4a1 1 0 01-1-1V9a1 1 0 011-1z" />
           <circle cx="12" cy="13" r="3.5" />
+        </svg>
+      );
+    case "gorjeta":
+      return (
+        <svg {...props}>
+          <path d="M12 20s-7-4.35-9.5-8.5C.9 8.2 2.6 4.5 6 4.5c2 0 3.4 1.1 6 3.6 2.6-2.5 4-3.6 6-3.6 3.4 0 5.1 3.7 3.5 7-2.5 4.15-9.5 8.5-9.5 8.5z" />
         </svg>
       );
     default:
@@ -517,6 +524,7 @@ function Painel() {
       {aba === "agenda" && <GerenciarAgenda />}
       {aba === "afinador" && <Afinador />}
       {aba === "videos" && <GerenciarVideos />}
+      {aba === "gorjeta" && <AbaGorjeta />}
       {aba === "pedidos" && <GerenciarPedidos onMudanca={contarPendentes} />}
       {aba === "acessos" && <AbaAcessos />}
     </div>
@@ -2504,6 +2512,166 @@ function extrairYoutubeId(texto) {
 function extrairInstagramId(texto) {
   const m = texto.trim().match(/instagram\.com\/(?:reel|reels|p)\/([A-Za-z0-9_-]+)/);
   return m ? m[1] : null;
+}
+
+/* ------------------------- GORJETA ------------------------- */
+// Config única (chave pix + qrcode + liga/desliga) que alimenta o convite
+// de gorjeta na página principal e na última etapa do modal de pedido.
+function AbaGorjeta() {
+  const [dados, setDados] = useState({ pix_chave: "", pix_qrcode_path: null, ativo: false });
+  const [carregando, setCarregando] = useState(true);
+  const [enviandoQr, setEnviandoQr] = useState(false);
+  const [status, setStatus] = useState("");
+
+  const carregar = async () => {
+    setCarregando(true);
+    const { data, error } = await supabase
+      .from("gorjeta")
+      .select("pix_chave, pix_qrcode_path, ativo")
+      .eq("id", true)
+      .maybeSingle();
+    if (!error && data) setDados(data);
+    setCarregando(false);
+  };
+
+  useEffect(() => {
+    carregar();
+  }, []);
+
+  const salvar = async (e) => {
+    e.preventDefault();
+    setStatus("⏳ Salvando...");
+    const { error } = await supabase
+      .from("gorjeta")
+      .update({ pix_chave: dados.pix_chave?.trim() || null, ativo: dados.ativo })
+      .eq("id", true);
+
+    if (error) {
+      console.error(error);
+      setStatus("❌ Erro ao salvar.");
+      return;
+    }
+    setStatus("✅ Salvo!");
+    setTimeout(() => setStatus(""), 2500);
+  };
+
+  const enviarQrCode = async (arquivo) => {
+    if (!arquivo) return;
+    if (!arquivo.type.startsWith("image/")) {
+      setStatus("❌ Envie uma imagem (PNG ou JPG).");
+      return;
+    }
+
+    setEnviandoQr(true);
+    setStatus("⏳ Enviando QR code...");
+
+    // Nome com timestamp: força o navegador a buscar a versão nova em vez
+    // de servir a antiga do cache, ao trocar o QR code
+    const extensao = arquivo.name.split(".").pop();
+    const path = `qrcode-${Date.now()}.${extensao}`;
+    const { error: upError } = await supabase.storage
+      .from("gorjeta")
+      .upload(path, arquivo, { contentType: arquivo.type });
+
+    if (upError) {
+      console.error(upError);
+      setStatus("❌ Erro ao enviar o QR code.");
+      setEnviandoQr(false);
+      return;
+    }
+
+    const antigo = dados.pix_qrcode_path;
+    const { error: dbError } = await supabase
+      .from("gorjeta")
+      .update({ pix_qrcode_path: path })
+      .eq("id", true);
+
+    if (dbError) {
+      console.error(dbError);
+      setStatus("❌ Erro ao vincular o QR code.");
+      setEnviandoQr(false);
+      return;
+    }
+    if (antigo) await supabase.storage.from("gorjeta").remove([antigo]);
+
+    setDados((d) => ({ ...d, pix_qrcode_path: path }));
+    setStatus("✅ QR code enviado!");
+    setTimeout(() => setStatus(""), 2500);
+    setEnviandoQr(false);
+  };
+
+  if (carregando) return <p className="text-cream-muted text-sm py-4">Carregando...</p>;
+
+  const qrcodeUrl = dados.pix_qrcode_path
+    ? supabase.storage.from("gorjeta").getPublicUrl(dados.pix_qrcode_path).data.publicUrl
+    : null;
+
+  return (
+    <div className="border border-noir-700 rounded-2xl p-5 bg-noir-900/50 max-w-xl">
+      <h2 className="section-title text-sm mb-1">Gorjeta</h2>
+      <p className="text-xs text-cream-muted mb-5">
+        Configure a chave Pix e o QR code mostrados ao público quando a gorjeta
+        estiver ativa — no modal de pedido (depois de enviar) e num botão na
+        página principal.
+      </p>
+
+      <form onSubmit={salvar} className="space-y-4">
+        <label className="flex items-center gap-2.5 text-sm text-cream cursor-pointer">
+          <input
+            type="checkbox"
+            className="w-5 h-5 accent-gold-500 rounded shrink-0"
+            checked={dados.ativo}
+            onChange={(e) => setDados({ ...dados, ativo: e.target.checked })}
+          />
+          Mostrar convite de gorjeta no site
+        </label>
+
+        <input
+          className="input-noir"
+          placeholder="Chave Pix (CPF, e-mail, telefone ou chave aleatória)"
+          value={dados.pix_chave ?? ""}
+          onChange={(e) => setDados({ ...dados, pix_chave: e.target.value })}
+        />
+
+        <div className="flex items-center gap-4">
+          {qrcodeUrl && (
+            <img
+              src={qrcodeUrl}
+              alt="QR code Pix atual"
+              className="w-24 h-24 rounded-xl border border-noir-700 bg-white p-1.5"
+            />
+          )}
+          <label
+            title={dados.pix_qrcode_path ? "Trocar o QR code" : "Enviar QR code"}
+            className={`inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border text-sm cursor-pointer transition ${
+              dados.pix_qrcode_path
+                ? "border-gold-600 text-gold-300 hover:bg-noir-800"
+                : "border-noir-700 text-cream-muted hover:text-gold-300 hover:border-gold-600"
+            } ${enviandoQr ? "opacity-50 pointer-events-none" : ""}`}
+          >
+            <Icone nome="anexo" className="w-4 h-4" />
+            {enviandoQr ? "⏳..." : dados.pix_qrcode_path ? "Trocar QR code" : "Enviar QR code"}
+            <input
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                enviarQrCode(e.target.files?.[0]);
+                e.target.value = "";
+              }}
+            />
+          </label>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button type="submit" className="btn-gold px-6 py-2.5 rounded-xl text-sm">
+            Salvar
+          </button>
+          {status && <span className="text-sm text-cream-muted">{status}</span>}
+        </div>
+      </form>
+    </div>
+  );
 }
 
 function GerenciarVideos() {
