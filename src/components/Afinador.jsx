@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { PitchDetector } from "pitchy";
 
 // Ícone em traço fino (respeita a cor do site via currentColor) — combina
 // com o padrão usado no Admin, em vez de emoji colorido
@@ -42,152 +43,57 @@ const cordaMaisProxima = (freq) =>
 // captada e a da corda de referência mais próxima
 const centavosDeDesvio = (freq, freqAlvo) => Math.round(1200 * Math.log2(freq / freqAlvo));
 
-// Abaixo desse limiar, o pico de autocorrelação não é confiável o
-// suficiente pra virar leitura (som não-periódico: ruído de fundo, ou o
-// instante em que a corda apagando vira mais harmônico/ruído do que tom
-// fundamental). Segue a mesma ideia de "clarity threshold" usada por
-// outros afinadores web (ex.: Pitchy/McLeod), que descartam a leitura em
-// vez de aceitar qualquer pico.
-// Começou em 0.85, mas isso rejeitava TODA leitura das 3 cordas mais
-// graves de nylon — cordas encordoadas têm harmônicos mais fortes/
-// complexos em relação à fundamental (mais ainda em nylon), então a
-// proporção pico/energia raramente chegava perto de 0.85 mesmo com a nota
-// certa soando limpa. 0.6 ainda filtra ruído de fundo/silêncio de verdade
-// (que fica bem mais perto de 0), só não exige um tom quase perfeitamente
-// limpo pra aceitar a leitura.
-const CLAREZA_MINIMA = 0.6;
+// Detecção de tom via pitchy (McLeod Pitch Method) em vez de uma
+// autocorrelação caseira — depois de várias rodadas calibrando limiares às
+// cegas (que ainda assim falhavam nas cordas graves, nylon e aço), trocamos
+// pelo algoritmo de uma biblioteca madura, desenhado especificamente pra
+// evitar erro de oitava/instabilidade. Os valores abaixo vêm de um afinador
+// web real em produção que usa a mesma lib (github.com/chordbook/tuner),
+// não de tentativa e erro:
+// - TAMANHO_BUFFER maior (8192 em vez dos 2048 de antes) dá muito mais
+//   períodos de onda pra analisar nas cordas graves (o E2, mais grave,
+//   tinha só ~3,8 períodos numa janela de 2048 amostras — pouco pra uma
+//   leitura confiável). Isso só é viável em custo de CPU porque pitchy usa
+//   FFT (O(n log n)) por baixo, não o loop O(n²) que tínhamos.
+// - CLAREZA_MINIMA de 0.9 é bem mais alta que a que tentamos antes (0.6),
+//   mas a "clareza" do McLeod Pitch Method é uma medida bem mais
+//   confiável que a nossa razão pico/energia caseira — nos testes de
+//   quem já usa essa lib em produção, 0.9 funciona sem rejeitar tom limpo.
+const TAMANHO_BUFFER = 8192;
+const CLAREZA_MINIMA = 0.9;
+// Faixa de frequência do violão (E2 a E4, com uma margem pra aceitar uma
+// corda destinada) — usada tanto pra filtrar a leitura quanto pra
+// configurar os filtros passa-alta/passa-baixa antes da análise
+const FREQ_MINIMA = 70;
+const FREQ_MAXIMA = 400;
 
-// Detecta a frequência fundamental por autocorrelação (algoritmo ACF2+,
-// clássico para afinadores — bom equilíbrio entre precisão e custo).
-// Devolve { freq, clareza, rms }: freq é -1 quando não há leitura válida
-// (silêncio/ruído/pico fraco demais); clareza é o quão "limpo" foi o pico
-// (0 a ~1), usada pelo chamador pra descartar leituras pouco confiáveis;
-// rms (volume do trecho) vem sempre preenchido, mesmo em leitura inválida
-// — é usado pra detectar o instante do dedilhado (ver LIMIAR_ATAQUE_RMS).
-function detectarFrequencia(buffer, sampleRate) {
-  const tamanho = buffer.length;
-
-  let rms = 0;
-  for (let i = 0; i < tamanho; i++) rms += buffer[i] * buffer[i];
-  rms = Math.sqrt(rms / tamanho);
-  const invalida = { freq: -1, clareza: 0, rms };
-  if (rms < 0.01) return invalida; // silêncio ou ruído fraco demais
-
-  const limiar = 0.2;
-  let inicio = 0;
-  let fim = tamanho - 1;
-  for (let i = 0; i < tamanho / 2; i++) {
-    if (Math.abs(buffer[i]) < limiar) {
-      inicio = i;
-      break;
-    }
-  }
-  for (let i = 1; i < tamanho / 2; i++) {
-    if (Math.abs(buffer[tamanho - i]) < limiar) {
-      fim = tamanho - i;
-      break;
-    }
-  }
-
-  const recorte = buffer.slice(inicio, fim);
-  const n = recorte.length;
-  if (n < 2) return invalida;
-
-  const correlacao = new Array(n).fill(0);
-  for (let defasagem = 0; defasagem < n; defasagem++) {
-    for (let j = 0; j < n - defasagem; j++) {
-      correlacao[defasagem] += recorte[j] * recorte[j + defasagem];
-    }
-  }
-
-  let d = 0;
-  while (d + 1 < n && correlacao[d] > correlacao[d + 1]) d++;
-
-  let melhorValor = -1;
-  let melhorPos = -1;
-  for (let i = d; i < n; i++) {
-    if (correlacao[i] > melhorValor) {
-      melhorValor = correlacao[i];
-      melhorPos = i;
-    }
-  }
-  if (melhorPos <= 0 || melhorPos >= n - 1) return invalida;
-
-  // correlacao[0] é a autocorrelação em defasagem zero (a energia do
-  // trecho) — por Cauchy-Schwarz é sempre >= qualquer outro lag, então a
-  // razão do pico encontrado por ela mede o quão periódico o sinal
-  // realmente é (perto de 1 = tom limpo; perto de 0 = ruído/transiente)
-  const clareza = correlacao[0] > 0 ? melhorValor / correlacao[0] : 0;
-  if (clareza < CLAREZA_MINIMA) return invalida;
-
-  // Interpolação parabólica em torno do pico para refinar o período
-  let periodo = melhorPos;
-  const x1 = correlacao[periodo - 1];
-  const x2 = correlacao[periodo];
-  const x3 = correlacao[periodo + 1];
-  const a = (x1 + x3 - 2 * x2) / 2;
-  const b = (x3 - x1) / 2;
-  if (a !== 0) periodo -= b / (2 * a);
-
-  return periodo > 0 ? { freq: sampleRate / periodo, clareza, rms } : invalida;
-}
-
-// Tamanho do histórico de leituras válidas usado pra suavizar a frequência
-// exibida (mediana das últimas N) — sem isso, cada frame (60x/s) mostra a
-// leitura bruta da autocorrelação, que varia bastante de um frame pro outro
-// (ruído, harmônicos, o ataque da corda) e fazia a nota piscar/trocar rápido
-// demais mesmo tocando uma corda só
-const HISTORICO_TAMANHO = 10;
-// Não atualiza a nota exibida mais rápido que isso — a corda não muda de
-// verdade a esse ritmo, então atualizar a cada frame só deixa a leitura
-// bruta (com ruído) piscando na tela
-const INTERVALO_ATUALIZACAO_MS = 160;
-// Frames seguidos sem detecção válida até considerar "silêncio de verdade"
+const INTERVALO_MS = 100;
+// Ticks seguidos sem leitura válida até considerar "silêncio de verdade"
 // e limpar a nota — uma corda dedilhada tem altos e baixos naturais de
-// volume, então um único frame sem sinal não pode apagar a nota na hora
-const FRAMES_ATE_SILENCIO = 20;
-
-// Detecta o "ataque" (o instante em que a corda é dedilhada) por um salto
-// de volume — mesma ideia usada pelo afinador de referência do Chrome Team
-// (github.com/googlearchive/guitar-tuner). Só decide DE NOVO qual corda
-// está tocando durante essa janela logo após o ataque; fora dela, a
-// decisão fica travada na última corda escolhida, então o ruído/harmônico
-// da cauda apagando não consegue mais trocar a nota exibida — só um novo
-// dedilhado (novo salto de volume) reabre a decisão.
-const LIMIAR_ATAQUE_RMS = 0.006;
-const JANELA_REAVALIACAO_MS = 250;
+// volume, então um único tick sem sinal não pode apagar a nota na hora
+const TICKS_ATE_SILENCIO = 6;
 
 export default function Afinador() {
   const [ouvindo, setOuvindo] = useState(false);
   const [erro, setErro] = useState("");
   const [frequencia, setFrequencia] = useState(null);
-  const [cordaTravada, setCordaTravada] = useState(null);
 
   const audioCtxRef = useRef(null);
   const streamRef = useRef(null);
-  const rafRef = useRef(null);
+  const intervalRef = useRef(null);
   const bufferRef = useRef(null);
-  const historicoRef = useRef([]);
-  const framesSilencioRef = useRef(0);
-  const ultimaAtualizacaoRef = useRef(0);
-  const rmsAnteriorRef = useRef(0);
-  const reavaliarAteRef = useRef(0);
-  const cordaTravadaRef = useRef(null);
+  const detectorRef = useRef(null);
+  const ticksSilencioRef = useRef(0);
 
   const pararEscuta = () => {
-    cancelAnimationFrame(rafRef.current);
+    clearInterval(intervalRef.current);
     streamRef.current?.getTracks().forEach((t) => t.stop());
     audioCtxRef.current?.close().catch(() => {});
     streamRef.current = null;
     audioCtxRef.current = null;
-    historicoRef.current = [];
-    framesSilencioRef.current = 0;
-    rmsAnteriorRef.current = 0;
-    reavaliarAteRef.current = 0;
-    cordaTravadaRef.current = null;
+    ticksSilencioRef.current = 0;
     setOuvindo(false);
     setFrequencia(null);
-    setCordaTravada(null);
   };
 
   useEffect(() => pararEscuta, []); // solta o microfone ao sair da aba
@@ -202,87 +108,43 @@ export default function Afinador() {
       const ctx = new AudioContextClasse();
       audioCtxRef.current = ctx;
 
+      // Filtra fora da faixa do violão ANTES da análise — reduz ruído
+      // grave (zumbido de rede, manuseio) e agudo (chiado, harmônicos
+      // distantes) que só atrapalhariam a detecção
+      const passaAlta = new BiquadFilterNode(ctx, { type: "highpass", frequency: FREQ_MINIMA });
+      const passaBaixa = new BiquadFilterNode(ctx, { type: "lowpass", frequency: FREQ_MAXIMA });
       const fonte = ctx.createMediaStreamSource(stream);
       const analiser = ctx.createAnalyser();
-      analiser.fftSize = 2048;
-      fonte.connect(analiser);
+      analiser.fftSize = TAMANHO_BUFFER;
+      fonte.connect(passaAlta).connect(passaBaixa).connect(analiser);
+
+      detectorRef.current = PitchDetector.forFloat32Array(analiser.fftSize);
       bufferRef.current = new Float32Array(analiser.fftSize);
-      historicoRef.current = [];
-      framesSilencioRef.current = 0;
-      ultimaAtualizacaoRef.current = 0;
-      rmsAnteriorRef.current = 0;
-      reavaliarAteRef.current = 0;
-      cordaTravadaRef.current = null;
+      ticksSilencioRef.current = 0;
 
       setOuvindo(true);
 
-      const loop = () => {
+      intervalRef.current = setInterval(() => {
         analiser.getFloatTimeDomainData(bufferRef.current);
-        const { freq: freqBruta, clareza, rms } = detectarFrequencia(
-          bufferRef.current,
-          ctx.sampleRate
-        );
-        // clareza já vem filtrada pelo mínimo dentro de detectarFrequencia
-        // (freqBruta é -1 quando não passou) — a checagem aqui é só pra
-        // deixar explícito o que faz uma leitura "valer"
-        const leituraValida = freqBruta > 0 && clareza > 0;
+        const [freq, clareza] = detectorRef.current.findPitch(bufferRef.current, ctx.sampleRate);
 
-        // Salto de volume = ataque novo — reabre a janela em que é
-        // permitido trocar qual corda está travada como "a" corda atual
-        const agoraFrame = performance.now();
-        if (rms > rmsAnteriorRef.current + LIMIAR_ATAQUE_RMS) {
-          reavaliarAteRef.current = agoraFrame + JANELA_REAVALIACAO_MS;
-        }
-        rmsAnteriorRef.current = rms;
+        const valida = clareza >= CLAREZA_MINIMA && freq >= FREQ_MINIMA && freq <= FREQ_MAXIMA;
 
-        if (leituraValida) {
-          framesSilencioRef.current = 0;
-          const historico = historicoRef.current;
-          historico.push(freqBruta);
-          if (historico.length > HISTORICO_TAMANHO) historico.shift();
+        if (valida) {
+          ticksSilencioRef.current = 0;
+          setFrequencia(freq);
         } else {
-          framesSilencioRef.current++;
-          if (framesSilencioRef.current > FRAMES_ATE_SILENCIO) {
-            historicoRef.current = [];
-            cordaTravadaRef.current = null; // silêncio de verdade: destrava
-          }
+          ticksSilencioRef.current++;
+          if (ticksSilencioRef.current > TICKS_ATE_SILENCIO) setFrequencia(null);
         }
-
-        const agora = performance.now();
-        if (agora - ultimaAtualizacaoRef.current >= INTERVALO_ATUALIZACAO_MS) {
-          ultimaAtualizacaoRef.current = agora;
-          const historico = historicoRef.current;
-          if (historico.length === 0) {
-            setFrequencia(null);
-            cordaTravadaRef.current = null;
-            setCordaTravada(null);
-          } else {
-            // Mediana em vez de média: um único harmônico/ruído fora da
-            // curva não arrasta o resultado como puxaria numa média
-            const ordenado = [...historico].sort((a, b) => a - b);
-            const mediana = ordenado[Math.floor(ordenado.length / 2)];
-            setFrequencia(mediana);
-
-            // Só reavalia qual corda é essa dentro da janela pós-ataque
-            // (ou se ainda não há nenhuma travada) — fora dela, mantém a
-            // última escolha mesmo que a leitura oscile um pouco
-            if (agora < reavaliarAteRef.current || !cordaTravadaRef.current) {
-              cordaTravadaRef.current = cordaMaisProxima(mediana);
-            }
-            setCordaTravada(cordaTravadaRef.current);
-          }
-        }
-
-        rafRef.current = requestAnimationFrame(loop);
-      };
-      loop();
+      }, INTERVALO_MS);
     } catch (e) {
       console.error("Erro ao acessar o microfone:", e);
       setErro("Não foi possível acessar o microfone. Confira a permissão do navegador.");
     }
   };
 
-  const corda = frequencia ? cordaTravada : null;
+  const corda = frequencia ? cordaMaisProxima(frequencia) : null;
   const desvio = corda ? centavosDeDesvio(frequencia, corda.freq) : 0;
   const desvioClamp = Math.max(-50, Math.min(50, desvio));
   const posicaoPercent = 50 + (desvioClamp / 50) * 45; // 5% a 95%
