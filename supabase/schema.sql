@@ -282,6 +282,88 @@ create policy "gorjeta: delete objeto autenticado"
   to authenticated
   using (bucket_id = 'gorjeta');
 
+-- ---------- TABELA: perfis_ocultar (perfis de ocultação por casa) ----------
+-- Cada perfil guarda o que ficar oculto do repertório público quando
+-- aplicado (ex.: "Casamento Silva" oculta o estilo "Sertanejo" e 3 músicas
+-- específicas) — reaproveitável toda vez que a dupla tocar naquela casa de
+-- novo, sem reconfigurar a ocultação do zero.
+create table if not exists public.perfis_ocultar (
+  id uuid primary key default gen_random_uuid(),
+  nome text not null,
+  musicas_ids uuid[] not null default '{}',
+  estilos text[] not null default '{}',
+  artistas text[] not null default '{}',
+  created_at timestamptz not null default now()
+);
+
+alter table public.perfis_ocultar enable row level security;
+
+create policy "perfis_ocultar: select autenticado"
+  on public.perfis_ocultar for select
+  to authenticated
+  using (true);
+
+create policy "perfis_ocultar: insert autenticado"
+  on public.perfis_ocultar for insert
+  to authenticated
+  with check (true);
+
+create policy "perfis_ocultar: update autenticado"
+  on public.perfis_ocultar for update
+  to authenticated
+  using (true);
+
+create policy "perfis_ocultar: delete autenticado"
+  on public.perfis_ocultar for delete
+  to authenticated
+  using (true);
+
+-- ---------- TABELA: ocultar_ativo (qual perfil está aplicado agora) ----------
+-- Linha única (id sempre true): perfil_id é o perfil em uso no show de
+-- hoje; expira_em (opcional) é quando o repertório completo deve voltar
+-- sozinho — sem prazo definido, fica oculto até alguém desativar na mão.
+create table if not exists public.ocultar_ativo (
+  id boolean primary key default true,
+  perfil_id uuid references public.perfis_ocultar(id) on delete set null,
+  ativado_em timestamptz,
+  expira_em timestamptz,
+  constraint ocultar_ativo_singleton check (id)
+);
+insert into public.ocultar_ativo (id) values (true) on conflict (id) do nothing;
+
+alter table public.ocultar_ativo enable row level security;
+
+create policy "ocultar_ativo: select autenticado"
+  on public.ocultar_ativo for select
+  to authenticated
+  using (true);
+
+create policy "ocultar_ativo: update autenticado"
+  on public.ocultar_ativo for update
+  to authenticated
+  using (true);
+
+-- View pública com só o que está oculto AGORA — nunca os nomes dos perfis
+-- nem os perfis inativos (isso é informação interna da dupla, não pro
+-- visitante). Ela mesma "expira": se expira_em já passou, devolve listas
+-- vazias sem precisar de nenhum job/cron rodando por fora. Views rodam com
+-- o privilégio de quem criou (o dono das tabelas), então funciona mesmo com
+-- RLS de "só autenticado" nas duas tabelas de baixo — só o SELECT nesta
+-- view é liberado pro público.
+create or replace view public.ocultos_ativos as
+select
+  case when a.expira_em is not null and a.expira_em <= now()
+       then '{}'::uuid[] else coalesce(p.musicas_ids, '{}') end as musicas_ids,
+  case when a.expira_em is not null and a.expira_em <= now()
+       then '{}'::text[] else coalesce(p.estilos, '{}') end as estilos,
+  case when a.expira_em is not null and a.expira_em <= now()
+       then '{}'::text[] else coalesce(p.artistas, '{}') end as artistas
+from public.ocultar_ativo a
+left join public.perfis_ocultar p on p.id = a.perfil_id
+where a.id = true;
+
+grant select on public.ocultos_ativos to anon, authenticated;
+
 -- ---------- (Opcional) Repertório inicial ----------
 -- insert into public.musicas (nome, artista, estilo) values
 --   ('Trevo (Tu)', 'Anavitória', 'MPB'),

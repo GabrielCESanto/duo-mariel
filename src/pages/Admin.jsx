@@ -10,6 +10,7 @@ import {
 import Afinador from "../components/Afinador";
 import { GOATCOUNTER_CODE } from "../config";
 import { buscarMusicasApi, existeNoItunes, buscarPreview } from "../lib/preview";
+import { normalizarNome } from "../lib/texto";
 
 const BASE = import.meta.env.BASE_URL;
 
@@ -49,19 +50,6 @@ const subirImagemPagina = async (path, blob) => {
 // sempre a resposta antiga (ou corrompida, de uma tentativa que falhou no
 // meio), mesmo depois do arquivo certo já estar no Storage.
 const caminhoImagemPagina = (musicaId, versao, pagina) => `${musicaId}-imgs${versao}-p${pagina}.jpg`;
-
-// Compara nomes de músicas ignorando acentos, caixa e pontuação
-const normalizarNome = (s) =>
-  String(s ?? "")
-    .toLowerCase()
-    .normalize("NFD")
-    // Remove os acentos (as marcas combinantes que o NFD separa das letras),
-    // usando os pontos de código Unicode por extenso em vez de caracteres
-    // combinantes literais no fonte — esses são invisíveis no editor e
-    // quebrariam silenciosamente se alguma ferramenta reescrever o arquivo.
-    .replace(new RegExp("[\\u0300-\\u036f]", "g"), "")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
 
 export default function Admin() {
   const [sessao, setSessao] = useState(null);
@@ -208,6 +196,7 @@ const ABAS_OUTROS = [
   ["aprender", "Aprender"],
   ["gorjeta", "Gorjeta"],
   ["musicas", "Músicas"],
+  ["ocultar", "Ocultar"],
   ["videos", "Vídeos"],
 ];
 
@@ -357,6 +346,22 @@ function Icone({ nome, className = "w-5 h-5" }) {
       return (
         <svg {...props}>
           <path d="M12 20s-7-4.35-9.5-8.5C.9 8.2 2.6 4.5 6 4.5c2 0 3.4 1.1 6 3.6 2.6-2.5 4-3.6 6-3.6 3.4 0 5.1 3.7 3.5 7-2.5 4.15-9.5 8.5-9.5 8.5z" />
+        </svg>
+      );
+    case "ocultar":
+      return (
+        <svg {...props}>
+          <path d="M3 3l18 18" />
+          <path d="M10.6 5.1A10.6 10.6 0 0112 5c6.4 0 10 7 10 7a17.5 17.5 0 01-3.7 4.6M6.6 6.6C3.7 8.4 2 12 2 12s3.6 7 10 7c1.4 0 2.7-.3 3.8-.8" />
+          <path d="M9.9 10a3 3 0 004.1 4.1" />
+        </svg>
+      );
+    case "mais":
+      return (
+        <svg {...props}>
+          <circle cx="12" cy="12" r="9" />
+          <line x1="12" y1="8" x2="12" y2="16" />
+          <line x1="8" y1="12" x2="16" y2="12" />
         </svg>
       );
     default:
@@ -525,6 +530,7 @@ function Painel() {
       {aba === "afinador" && <Afinador />}
       {aba === "videos" && <GerenciarVideos />}
       {aba === "gorjeta" && <AbaGorjeta />}
+      {aba === "ocultar" && <AbaOcultar />}
       {aba === "pedidos" && <GerenciarPedidos onMudanca={contarPendentes} />}
       {aba === "acessos" && <AbaAcessos />}
     </div>
@@ -2674,6 +2680,378 @@ function AbaGorjeta() {
   );
 }
 
+/* ------------------------- OCULTAR ------------------------- */
+
+// Checklist com busca opcional — usado pra escolher músicas/estilos/
+// artistas dentro de um perfil de ocultação
+function ListaSelecao({ titulo, opcoes, selecionados, aoAlternar, comBusca }) {
+  const [busca, setBusca] = useState("");
+  const visiveis = comBusca
+    ? opcoes.filter((o) => o.rotulo.toLowerCase().includes(busca.trim().toLowerCase()))
+    : opcoes;
+
+  return (
+    <div>
+      <p className="text-xs uppercase tracking-wider text-cream-muted mb-2">
+        {titulo} ({selecionados.size})
+      </p>
+      {comBusca && (
+        <input
+          className="input-noir text-sm mb-2"
+          placeholder={`Buscar em ${titulo.toLowerCase()}...`}
+          value={busca}
+          onChange={(e) => setBusca(e.target.value)}
+        />
+      )}
+      <div className="max-h-48 overflow-y-auto border border-noir-800 rounded-xl p-2 space-y-0.5">
+        {visiveis.map((o) => (
+          <label
+            key={o.valor}
+            className="flex items-center gap-2 text-sm text-cream px-1.5 py-1.5 rounded-lg hover:bg-noir-800 cursor-pointer"
+          >
+            <input
+              type="checkbox"
+              className="w-4 h-4 accent-gold-500 rounded shrink-0"
+              checked={selecionados.has(o.valor)}
+              onChange={() => aoAlternar(o.valor)}
+            />
+            <span className="truncate">{o.rotulo}</span>
+          </label>
+        ))}
+        {visiveis.length === 0 && (
+          <p className="text-xs text-cream-muted py-2 px-1.5">Nada encontrado.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const formularioPerfilVazio = () => ({
+  id: null,
+  nome: "",
+  musicasIds: new Set(),
+  estilos: new Set(),
+  artistas: new Set(),
+});
+
+function AbaOcultar() {
+  const [musicas, setMusicas] = useState([]);
+  const [perfis, setPerfis] = useState([]);
+  const [ativo, setAtivo] = useState(null);
+  const [carregando, setCarregando] = useState(true);
+  const [status, setStatus] = useState("");
+  const [form, setForm] = useState(null); // null = form fechado
+  const [prazoPorPerfil, setPrazoPorPerfil] = useState({}); // perfilId -> texto do campo "dias"
+
+  const carregar = async () => {
+    setCarregando(true);
+    const [musicasRes, perfisRes, ativoRes] = await Promise.all([
+      supabase.from("musicas").select("id, nome, artista, estilo").order("nome"),
+      supabase.from("perfis_ocultar").select("*").order("nome"),
+      supabase.from("ocultar_ativo").select("*").eq("id", true).maybeSingle(),
+    ]);
+    if (!musicasRes.error) setMusicas(musicasRes.data ?? []);
+    if (!perfisRes.error) setPerfis(perfisRes.data ?? []);
+
+    let linhaAtivo = ativoRes.data ?? null;
+    // O prazo (em dias) já passou — volta o repertório completo sozinho.
+    // Não há cron neste projeto, então isso é resolvido na próxima vez que
+    // alguém abre esta aba (o site público já trata a expiração sozinho,
+    // via a view ocultos_ativos; isto aqui só mantém a aba em si coerente)
+    if (linhaAtivo?.perfil_id && linhaAtivo.expira_em && new Date(linhaAtivo.expira_em) <= new Date()) {
+      await supabase
+        .from("ocultar_ativo")
+        .update({ perfil_id: null, ativado_em: null, expira_em: null })
+        .eq("id", true);
+      linhaAtivo = { ...linhaAtivo, perfil_id: null, ativado_em: null, expira_em: null };
+    }
+    setAtivo(linhaAtivo);
+    setCarregando(false);
+  };
+
+  useEffect(() => {
+    carregar();
+  }, []);
+
+  const perfilAtivo = perfis.find((p) => p.id === ativo?.perfil_id) ?? null;
+
+  const opcoesEstilos = Array.from(new Set(musicas.map((m) => m.estilo).filter(Boolean)))
+    .sort((a, b) => a.localeCompare(b, "pt-BR"))
+    .map((e) => ({ valor: e, rotulo: e }));
+  const opcoesArtistas = Array.from(new Set(musicas.map((m) => m.artista).filter(Boolean)))
+    .sort((a, b) => a.localeCompare(b, "pt-BR"))
+    .map((a) => ({ valor: a, rotulo: a }));
+  const opcoesMusicas = musicas.map((m) => ({ valor: m.id, rotulo: `${m.nome} — ${m.artista}` }));
+
+  const alternarNoSet = (chave) => (valor) =>
+    setForm((f) => {
+      const novoSet = new Set(f[chave]);
+      novoSet.has(valor) ? novoSet.delete(valor) : novoSet.add(valor);
+      return { ...f, [chave]: novoSet };
+    });
+
+  const editarPerfil = (p) => {
+    setForm({
+      id: p.id,
+      nome: p.nome,
+      musicasIds: new Set(p.musicas_ids ?? []),
+      estilos: new Set(p.estilos ?? []),
+      artistas: new Set(p.artistas ?? []),
+    });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const salvarPerfil = async (e) => {
+    e.preventDefault();
+    const nome = form.nome.trim();
+    if (!nome) return;
+
+    const registro = {
+      nome,
+      musicas_ids: Array.from(form.musicasIds),
+      estilos: Array.from(form.estilos),
+      artistas: Array.from(form.artistas),
+    };
+
+    setStatus("⏳ Salvando...");
+    const { error } = form.id
+      ? await supabase.from("perfis_ocultar").update(registro).eq("id", form.id)
+      : await supabase.from("perfis_ocultar").insert(registro);
+
+    if (error) {
+      console.error(error);
+      setStatus("❌ Erro ao salvar.");
+      return;
+    }
+    setStatus("✅ Perfil salvo!");
+    setTimeout(() => setStatus(""), 2500);
+    setForm(null);
+    carregar();
+  };
+
+  const excluirPerfil = async (p) => {
+    if (!window.confirm(`Excluir o perfil "${p.nome}"?`)) return;
+    const { error } = await supabase.from("perfis_ocultar").delete().eq("id", p.id);
+    if (error) {
+      console.error(error);
+      setStatus("❌ Erro ao excluir.");
+      return;
+    }
+    carregar();
+  };
+
+  const ativarPerfil = async (perfil) => {
+    const diasTexto = (prazoPorPerfil[perfil.id] ?? "").trim();
+    const dias = diasTexto ? Number(diasTexto) : null;
+    if (diasTexto && (!Number.isFinite(dias) || dias <= 0)) {
+      setStatus("❌ Prazo inválido — use um número de dias maior que zero, ou deixe em branco.");
+      return;
+    }
+
+    const agora = new Date();
+    const expiraEm = dias ? new Date(agora.getTime() + dias * 86_400_000).toISOString() : null;
+
+    setStatus("⏳ Ativando...");
+    const { error } = await supabase
+      .from("ocultar_ativo")
+      .update({ perfil_id: perfil.id, ativado_em: agora.toISOString(), expira_em: expiraEm })
+      .eq("id", true);
+
+    if (error) {
+      console.error(error);
+      setStatus("❌ Erro ao ativar.");
+      return;
+    }
+    setStatus(`✅ "${perfil.nome}" ativado!`);
+    setTimeout(() => setStatus(""), 2500);
+    carregar();
+  };
+
+  const desativar = async () => {
+    setStatus("⏳ Restaurando repertório completo...");
+    const { error } = await supabase
+      .from("ocultar_ativo")
+      .update({ perfil_id: null, ativado_em: null, expira_em: null })
+      .eq("id", true);
+
+    if (error) {
+      console.error(error);
+      setStatus("❌ Erro ao desativar.");
+      return;
+    }
+    setStatus("✅ Repertório completo de volta!");
+    setTimeout(() => setStatus(""), 2500);
+    carregar();
+  };
+
+  if (carregando) return <p className="text-cream-muted text-sm py-4">Carregando...</p>;
+
+  return (
+    <div className="space-y-6">
+      {/* Estado atual */}
+      <div className="border border-noir-700 rounded-2xl p-5 bg-noir-900/50">
+        <h2 className="section-title text-sm mb-3">Estado atual</h2>
+        {perfilAtivo ? (
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div className="min-w-0">
+              <p className="text-cream">
+                Perfil ativo: <span className="text-gold-300 font-medium">{perfilAtivo.nome}</span>
+              </p>
+              <p className="text-cream-muted text-xs mt-1">
+                Ativado em {new Date(ativo.ativado_em).toLocaleString("pt-BR")}
+                {ativo.expira_em
+                  ? ` — repertório completo volta em ${new Date(ativo.expira_em).toLocaleString("pt-BR")}`
+                  : " — sem prazo (volta só quando você desativar)"}
+              </p>
+              <p className="text-cream-muted text-xs mt-1">
+                Oculta {perfilAtivo.musicas_ids?.length ?? 0} música(s),{" "}
+                {perfilAtivo.estilos?.length ?? 0} estilo(s) e {perfilAtivo.artistas?.length ?? 0}{" "}
+                artista(s).
+              </p>
+            </div>
+            <button
+              onClick={desativar}
+              className="shrink-0 px-4 py-2 rounded-xl border border-gold-600 text-sm text-gold-300 hover:bg-noir-800 transition"
+            >
+              Restaurar repertório completo
+            </button>
+          </div>
+        ) : (
+          <p className="text-cream-muted text-sm">
+            Repertório completo — nenhum perfil de ocultação ativo no momento.
+          </p>
+        )}
+        {status && <p className="text-sm text-cream-muted mt-3">{status}</p>}
+      </div>
+
+      {/* Formulário de criação/edição */}
+      {form && (
+        <form
+          onSubmit={salvarPerfil}
+          className="border border-noir-700 rounded-2xl p-5 bg-noir-900/50 space-y-4"
+        >
+          <h2 className="section-title text-sm">{form.id ? "Editar perfil" : "Novo perfil"}</h2>
+          <input
+            className="input-noir"
+            placeholder="Nome do perfil (ex.: nome da casa/evento) *"
+            value={form.nome}
+            onChange={(e) => setForm({ ...form, nome: e.target.value })}
+            required
+          />
+
+          <div className="grid gap-4 sm:grid-cols-3">
+            <ListaSelecao
+              titulo="Estilos"
+              opcoes={opcoesEstilos}
+              selecionados={form.estilos}
+              aoAlternar={alternarNoSet("estilos")}
+            />
+            <ListaSelecao
+              titulo="Artistas"
+              opcoes={opcoesArtistas}
+              selecionados={form.artistas}
+              aoAlternar={alternarNoSet("artistas")}
+            />
+            <ListaSelecao
+              titulo="Músicas"
+              opcoes={opcoesMusicas}
+              selecionados={form.musicasIds}
+              aoAlternar={alternarNoSet("musicasIds")}
+              comBusca
+            />
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button type="submit" className="btn-gold px-6 py-2.5 rounded-xl text-sm">
+              Salvar perfil
+            </button>
+            <button
+              type="button"
+              onClick={() => setForm(null)}
+              className="px-4 py-2.5 rounded-xl border border-noir-700 text-sm text-cream-muted hover:text-cream transition"
+            >
+              Cancelar
+            </button>
+          </div>
+        </form>
+      )}
+
+      {/* Perfis salvos */}
+      <div className="border border-noir-700 rounded-2xl p-5 bg-noir-900/50">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="section-title text-sm">Perfis salvos ({perfis.length})</h2>
+          {!form && (
+            <button
+              onClick={() => setForm(formularioPerfilVazio())}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-noir-700 text-xs text-cream-muted hover:text-gold-300 hover:border-gold-600 transition"
+            >
+              <Icone nome="mais" className="w-3.5 h-3.5" />
+              Novo perfil
+            </button>
+          )}
+        </div>
+
+        {perfis.length === 0 ? (
+          <p className="text-cream-muted text-sm py-4">
+            Nenhum perfil salvo ainda. Crie um pra reaproveitar toda vez que tocar naquela casa.
+          </p>
+        ) : (
+          <ul className="divide-y divide-noir-800">
+            {perfis.map((p) => (
+              <li key={p.id} className="py-3 flex items-center justify-between gap-3 flex-wrap">
+                <div className="min-w-0">
+                  <p className="text-cream truncate">
+                    {p.nome}
+                    {ativo?.perfil_id === p.id && (
+                      <span className="ml-2 text-[10px] uppercase tracking-wider text-gold-300 border border-gold-600 rounded-full px-2 py-0.5">
+                        ativo
+                      </span>
+                    )}
+                  </p>
+                  <p className="text-cream-muted text-xs mt-0.5">
+                    {(p.musicas_ids?.length ?? 0)} música(s), {(p.estilos?.length ?? 0)} estilo(s),{" "}
+                    {(p.artistas?.length ?? 0)} artista(s)
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+                  <input
+                    type="number"
+                    min="1"
+                    className="input-noir !w-28 text-sm py-1.5"
+                    placeholder="Prazo (dias)"
+                    value={prazoPorPerfil[p.id] ?? ""}
+                    onChange={(e) =>
+                      setPrazoPorPerfil((estado) => ({ ...estado, [p.id]: e.target.value }))
+                    }
+                  />
+                  <button
+                    onClick={() => ativarPerfil(p)}
+                    className="btn-gold px-3 py-1.5 rounded-lg text-xs"
+                  >
+                    Ativar
+                  </button>
+                  <button
+                    onClick={() => editarPerfil(p)}
+                    className="px-3 py-1.5 rounded-lg border border-noir-700 text-xs text-cream-muted hover:text-gold-300 hover:border-gold-600 transition"
+                  >
+                    Editar
+                  </button>
+                  <button
+                    onClick={() => excluirPerfil(p)}
+                    className="px-3 py-1.5 rounded-lg border border-noir-700 text-xs text-cream-muted hover:text-red-400 hover:border-red-900 transition"
+                  >
+                    Excluir
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function GerenciarVideos() {
   const [videos, setVideos] = useState([]);
   const [carregando, setCarregando] = useState(true);
@@ -3014,10 +3392,17 @@ function AbaAcessos() {
 
 // Prefixo usado pelo modal público quando a música não está no repertório
 const PREFIXO_SUGESTAO = "[Sugestão]";
+// Mesma origem (busca sem resultado → "Pedir para entrar no repertório"),
+// mas o SugestaoModal detectou que a música já é nossa — só está oculta no
+// momento (perfil ativo na aba Ocultar) — pra não virar sugestão de
+// aprender algo que a dupla já sabe tocar
+const PREFIXO_OCULTA = "[Oculta]";
+
+const limparPrefixoPedido = (textoPedido) =>
+  textoPedido.replace(PREFIXO_SUGESTAO, "").replace(PREFIXO_OCULTA, "").trim();
 
 // Extrai o nome da música (antes do " — artista") de um texto de pedido
-const nomeDoPedido = (textoPedido) =>
-  textoPedido.replace(PREFIXO_SUGESTAO, "").trim().split(" — ")[0].trim();
+const nomeDoPedido = (textoPedido) => limparPrefixoPedido(textoPedido).split(" — ")[0].trim();
 
 const DIAS_ATE_ARQUIVAR = 15;
 const dataCorteArquivo = () => {
@@ -3143,7 +3528,7 @@ function GerenciarPedidos({ onMudanca }) {
 
   // Manda o pedido para a lista "Aprender" (para Ambos) e marca como atendido
   const mandarParaAprender = async (p) => {
-    const texto = p.pedido.replace(PREFIXO_SUGESTAO, "").trim();
+    const texto = limparPrefixoPedido(p.pedido);
     const [musica, artista] = texto.split(" — ");
     if (!window.confirm(`Adicionar "${texto}" à lista de músicas para aprender?`)) return;
 
@@ -3274,10 +3659,15 @@ function GerenciarPedidos({ onMudanca }) {
               >
                 <div className="min-w-0">
                   <p className={`truncate ${p.atendido ? "line-through text-cream-muted" : "text-cream"}`}>
-                    {p.pedido.replace(PREFIXO_SUGESTAO, "").trim()}
+                    {limparPrefixoPedido(p.pedido)}
                     {p.pedido.startsWith(PREFIXO_SUGESTAO) && (
                       <span className="ml-2 text-[10px] uppercase tracking-wider text-gold-300 border border-gold-600 rounded-full px-2 py-0.5">
                         fora do repertório
+                      </span>
+                    )}
+                    {p.pedido.startsWith(PREFIXO_OCULTA) && (
+                      <span className="ml-2 text-[10px] uppercase tracking-wider text-cream-muted border border-noir-600 rounded-full px-2 py-0.5">
+                        🙈 já é nossa, só oculta
                       </span>
                     )}
                   </p>
@@ -3355,6 +3745,7 @@ function DetalhePedidoModal({
   onExcluir,
 }) {
   const ehSugestao = p.pedido.startsWith(PREFIXO_SUGESTAO);
+  const ehOculta = p.pedido.startsWith(PREFIXO_OCULTA);
 
   return (
     <div
@@ -3372,6 +3763,11 @@ function DetalhePedidoModal({
               {ehSugestao && (
                 <span className="text-[10px] uppercase tracking-wider text-gold-300 border border-gold-600 rounded-full px-2 py-0.5">
                   fora do repertório
+                </span>
+              )}
+              {ehOculta && (
+                <span className="text-[10px] uppercase tracking-wider text-cream-muted border border-noir-600 rounded-full px-2 py-0.5">
+                  🙈 já é nossa, só oculta
                 </span>
               )}
               <span
@@ -3394,9 +3790,7 @@ function DetalhePedidoModal({
           </button>
         </div>
 
-        <p className="text-cream text-lg mt-4 break-words">
-          {p.pedido.replace(PREFIXO_SUGESTAO, "").trim()}
-        </p>
+        <p className="text-cream text-lg mt-4 break-words">{limparPrefixoPedido(p.pedido)}</p>
 
         {p.mensagem && (
           <p className="text-cream-muted mt-3 break-words whitespace-pre-wrap">

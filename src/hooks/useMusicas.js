@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase, supabaseConfigured } from "../lib/supabase";
 import { REPERTORIO_DEMO } from "../data/repertorioDemo";
+import { useOcultos } from "./useOcultos";
 
 export function useMusicas() {
-  const [musicas, setMusicas] = useState([]);
+  const [todas, setTodas] = useState([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState(null);
+  const ocultos = useOcultos();
 
   const recarregar = useCallback(async () => {
     if (!supabaseConfigured) {
-      setMusicas(REPERTORIO_DEMO);
+      setTodas(REPERTORIO_DEMO);
       setCarregando(false);
       return;
     }
@@ -24,10 +26,10 @@ export function useMusicas() {
     if (error) {
       console.error("Erro ao carregar repertório:", error);
       setErro(error.message);
-      setMusicas([]);
+      setTodas([]);
     } else {
       setErro(null);
-      setMusicas(data ?? []);
+      setTodas(data ?? []);
     }
     setCarregando(false);
   }, []);
@@ -36,5 +38,20 @@ export function useMusicas() {
     recarregar();
   }, [recarregar]);
 
-  return { musicas, carregando, erro, recarregar };
+  // Filtra o que estiver oculto agora (perfil ativo na aba Ocultar do
+  // admin) — em memória, não no banco: o hook já busca o repertório
+  // inteiro, e o conjunto oculto muda com pouca frequência (só quando a
+  // dupla ativa/desativa um perfil antes de um show)
+  const idsOcultos = new Set(ocultos.musicas_ids);
+  const estilosOcultos = new Set(ocultos.estilos);
+  const artistasOcultos = new Set(ocultos.artistas);
+  const estaOculta = (m) =>
+    idsOcultos.has(m.id) || estilosOcultos.has(m.estilo) || artistasOcultos.has(m.artista);
+
+  const musicas = todas.filter((m) => !estaOculta(m));
+  // Exposto pra SugestaoModal reconhecer quando alguém "sugere" uma música
+  // que na verdade já é nossa, só está oculta no momento
+  const musicasOcultas = todas.filter(estaOculta);
+
+  return { musicas, musicasOcultas, carregando, erro, recarregar };
 }

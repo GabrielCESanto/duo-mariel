@@ -33,7 +33,7 @@ function IconeMais({ className = "w-4 h-4" }) {
 }
 
 export default function Home() {
-  const { musicas, carregando } = useMusicas();
+  const { musicas, musicasOcultas, carregando } = useMusicas();
   const { videos } = useVideos();
   const { gorjeta } = useGorjeta();
 
@@ -341,6 +341,7 @@ export default function Home() {
       <SugestaoModal
         aberto={sugestaoAberta}
         musicaInicial={busca.trim()}
+        musicasOcultas={musicasOcultas}
         onFechar={() => setSugestaoAberta(false)}
       />
       <GorjetaModal

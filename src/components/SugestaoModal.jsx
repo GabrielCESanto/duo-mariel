@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { PEDIDO_FUNCTION_URL, anonKey, supabaseConfigured } from "../lib/supabase";
+import { normalizarNome } from "../lib/texto";
 
-export default function SugestaoModal({ aberto, musicaInicial, onFechar }) {
+export default function SugestaoModal({ aberto, musicaInicial, musicasOcultas, onFechar }) {
   const [musica, setMusica] = useState("");
   const [artista, setArtista] = useState("");
   const [mensagem, setMensagem] = useState("");
@@ -31,11 +32,24 @@ export default function SugestaoModal({ aberto, musicaInicial, onFechar }) {
 
     try {
       setEnviando(true);
-      setStatus("⏳ Enviando sugestão...");
+
+      // Antes de tratar como "música desconhecida", confere se ela só está
+      // oculta no momento (perfil ativo na aba Ocultar) — nesse caso é uma
+      // música que a dupla já sabe tocar, não uma sugestão de aprender
+      const nomeBuscado = normalizarNome(musica);
+      const correspondeOculta = (musicasOcultas ?? []).some(
+        (m) => normalizarNome(m.nome) === nomeBuscado
+      );
+      const prefixo = correspondeOculta ? "[Oculta]" : "[Sugestão]";
+
+      setStatus(
+        correspondeOculta ? "⏳ Enviando pedido..." : "⏳ Enviando sugestão..."
+      );
 
       // Vai para a lista de PEDIDOS do admin — lá o duo decide se a música
-      // entra na lista de aprender ou não
-      const textoPedido = `[Sugestão] ${musica.trim()}${
+      // entra na lista de aprender ou não (ou só reconhece que já é dela,
+      // se só estiver oculta)
+      const textoPedido = `${prefixo} ${musica.trim()}${
         artista.trim() ? ` — ${artista.trim()}` : ""
       }`.slice(0, 200);
 
@@ -54,7 +68,11 @@ export default function SugestaoModal({ aberto, musicaInicial, onFechar }) {
 
       if (!resp.ok) throw new Error(await resp.text());
 
-      setStatus("✅ Sugestão enviada! Quem sabe ela entra no repertório 🎶");
+      setStatus(
+        correspondeOculta
+          ? "✅ Pedido enviado! Essa música é nossa — deve voltar em breve 🎶"
+          : "✅ Sugestão enviada! Quem sabe ela entra no repertório 🎶"
+      );
       setEnviado(true);
       setTimeout(onFechar, 1400);
     } catch (e) {
