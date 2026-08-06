@@ -54,16 +54,18 @@ const CLAREZA_MINIMA = 0.85;
 
 // Detecta a frequência fundamental por autocorrelação (algoritmo ACF2+,
 // clássico para afinadores — bom equilíbrio entre precisão e custo).
-// Devolve { freq, clareza }: freq é -1 quando não há leitura válida
+// Devolve { freq, clareza, rms }: freq é -1 quando não há leitura válida
 // (silêncio/ruído/pico fraco demais); clareza é o quão "limpo" foi o pico
-// (0 a ~1), usada pelo chamador pra descartar leituras pouco confiáveis.
+// (0 a ~1), usada pelo chamador pra descartar leituras pouco confiáveis;
+// rms (volume do trecho) vem sempre preenchido, mesmo em leitura inválida
+// — é usado pra detectar o instante do dedilhado (ver LIMIAR_ATAQUE_RMS).
 function detectarFrequencia(buffer, sampleRate) {
   const tamanho = buffer.length;
-  const invalida = { freq: -1, clareza: 0 };
 
   let rms = 0;
   for (let i = 0; i < tamanho; i++) rms += buffer[i] * buffer[i];
   rms = Math.sqrt(rms / tamanho);
+  const invalida = { freq: -1, clareza: 0, rms };
   if (rms < 0.01) return invalida; // silêncio ou ruído fraco demais
 
   const limiar = 0.2;
@@ -122,7 +124,7 @@ function detectarFrequencia(buffer, sampleRate) {
   const b = (x3 - x1) / 2;
   if (a !== 0) periodo -= b / (2 * a);
 
-  return periodo > 0 ? { freq: sampleRate / periodo, clareza } : invalida;
+  return periodo > 0 ? { freq: sampleRate / periodo, clareza, rms } : invalida;
 }
 
 // Tamanho do histórico de leituras válidas usado pra suavizar a frequência
@@ -140,10 +142,21 @@ const INTERVALO_ATUALIZACAO_MS = 160;
 // volume, então um único frame sem sinal não pode apagar a nota na hora
 const FRAMES_ATE_SILENCIO = 20;
 
+// Detecta o "ataque" (o instante em que a corda é dedilhada) por um salto
+// de volume — mesma ideia usada pelo afinador de referência do Chrome Team
+// (github.com/googlearchive/guitar-tuner). Só decide DE NOVO qual corda
+// está tocando durante essa janela logo após o ataque; fora dela, a
+// decisão fica travada na última corda escolhida, então o ruído/harmônico
+// da cauda apagando não consegue mais trocar a nota exibida — só um novo
+// dedilhado (novo salto de volume) reabre a decisão.
+const LIMIAR_ATAQUE_RMS = 0.006;
+const JANELA_REAVALIACAO_MS = 250;
+
 export default function Afinador() {
   const [ouvindo, setOuvindo] = useState(false);
   const [erro, setErro] = useState("");
   const [frequencia, setFrequencia] = useState(null);
+  const [cordaTravada, setCordaTravada] = useState(null);
 
   const audioCtxRef = useRef(null);
   const streamRef = useRef(null);
@@ -152,6 +165,9 @@ export default function Afinador() {
   const historicoRef = useRef([]);
   const framesSilencioRef = useRef(0);
   const ultimaAtualizacaoRef = useRef(0);
+  const rmsAnteriorRef = useRef(0);
+  const reavaliarAteRef = useRef(0);
+  const cordaTravadaRef = useRef(null);
 
   const pararEscuta = () => {
     cancelAnimationFrame(rafRef.current);
@@ -161,8 +177,12 @@ export default function Afinador() {
     audioCtxRef.current = null;
     historicoRef.current = [];
     framesSilencioRef.current = 0;
+    rmsAnteriorRef.current = 0;
+    reavaliarAteRef.current = 0;
+    cordaTravadaRef.current = null;
     setOuvindo(false);
     setFrequencia(null);
+    setCordaTravada(null);
   };
 
   useEffect(() => pararEscuta, []); // solta o microfone ao sair da aba
@@ -185,16 +205,30 @@ export default function Afinador() {
       historicoRef.current = [];
       framesSilencioRef.current = 0;
       ultimaAtualizacaoRef.current = 0;
+      rmsAnteriorRef.current = 0;
+      reavaliarAteRef.current = 0;
+      cordaTravadaRef.current = null;
 
       setOuvindo(true);
 
       const loop = () => {
         analiser.getFloatTimeDomainData(bufferRef.current);
-        const { freq: freqBruta, clareza } = detectarFrequencia(bufferRef.current, ctx.sampleRate);
+        const { freq: freqBruta, clareza, rms } = detectarFrequencia(
+          bufferRef.current,
+          ctx.sampleRate
+        );
         // clareza já vem filtrada pelo mínimo dentro de detectarFrequencia
         // (freqBruta é -1 quando não passou) — a checagem aqui é só pra
         // deixar explícito o que faz uma leitura "valer"
         const leituraValida = freqBruta > 0 && clareza > 0;
+
+        // Salto de volume = ataque novo — reabre a janela em que é
+        // permitido trocar qual corda está travada como "a" corda atual
+        const agoraFrame = performance.now();
+        if (rms > rmsAnteriorRef.current + LIMIAR_ATAQUE_RMS) {
+          reavaliarAteRef.current = agoraFrame + JANELA_REAVALIACAO_MS;
+        }
+        rmsAnteriorRef.current = rms;
 
         if (leituraValida) {
           framesSilencioRef.current = 0;
@@ -203,7 +237,10 @@ export default function Afinador() {
           if (historico.length > HISTORICO_TAMANHO) historico.shift();
         } else {
           framesSilencioRef.current++;
-          if (framesSilencioRef.current > FRAMES_ATE_SILENCIO) historicoRef.current = [];
+          if (framesSilencioRef.current > FRAMES_ATE_SILENCIO) {
+            historicoRef.current = [];
+            cordaTravadaRef.current = null; // silêncio de verdade: destrava
+          }
         }
 
         const agora = performance.now();
@@ -212,11 +249,22 @@ export default function Afinador() {
           const historico = historicoRef.current;
           if (historico.length === 0) {
             setFrequencia(null);
+            cordaTravadaRef.current = null;
+            setCordaTravada(null);
           } else {
             // Mediana em vez de média: um único harmônico/ruído fora da
             // curva não arrasta o resultado como puxaria numa média
             const ordenado = [...historico].sort((a, b) => a - b);
-            setFrequencia(ordenado[Math.floor(ordenado.length / 2)]);
+            const mediana = ordenado[Math.floor(ordenado.length / 2)];
+            setFrequencia(mediana);
+
+            // Só reavalia qual corda é essa dentro da janela pós-ataque
+            // (ou se ainda não há nenhuma travada) — fora dela, mantém a
+            // última escolha mesmo que a leitura oscile um pouco
+            if (agora < reavaliarAteRef.current || !cordaTravadaRef.current) {
+              cordaTravadaRef.current = cordaMaisProxima(mediana);
+            }
+            setCordaTravada(cordaTravadaRef.current);
           }
         }
 
@@ -229,7 +277,7 @@ export default function Afinador() {
     }
   };
 
-  const corda = frequencia ? cordaMaisProxima(frequencia) : null;
+  const corda = frequencia ? cordaTravada : null;
   const desvio = corda ? centavosDeDesvio(frequencia, corda.freq) : 0;
   const desvioClamp = Math.max(-50, Math.min(50, desvio));
   const posicaoPercent = 50 + (desvioClamp / 50) * 45; // 5% a 95%
