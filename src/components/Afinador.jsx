@@ -42,15 +42,29 @@ const cordaMaisProxima = (freq) =>
 // captada e a da corda de referência mais próxima
 const centavosDeDesvio = (freq, freqAlvo) => Math.round(1200 * Math.log2(freq / freqAlvo));
 
+// Abaixo desse limiar, o pico de autocorrelação não é confiável o
+// suficiente pra virar leitura (som não-periódico: ruído de fundo, ou o
+// instante em que a corda apagando vira mais harmônico/ruído do que tom
+// fundamental). É o que fazia a nota "trocar" bruscamente bem no momento
+// em que a corda parava de soar, em vez de simplesmente sumir — a leitura
+// ruim daquele instante entrava na mediana como se fosse válida. Segue a
+// mesma ideia de "clarity threshold" usada por outros afinadores web (ex.:
+// Pitchy/McLeod), que descartam a leitura em vez de aceitar qualquer pico.
+const CLAREZA_MINIMA = 0.85;
+
 // Detecta a frequência fundamental por autocorrelação (algoritmo ACF2+,
-// clássico para afinadores — bom equilíbrio entre precisão e custo)
+// clássico para afinadores — bom equilíbrio entre precisão e custo).
+// Devolve { freq, clareza }: freq é -1 quando não há leitura válida
+// (silêncio/ruído/pico fraco demais); clareza é o quão "limpo" foi o pico
+// (0 a ~1), usada pelo chamador pra descartar leituras pouco confiáveis.
 function detectarFrequencia(buffer, sampleRate) {
   const tamanho = buffer.length;
+  const invalida = { freq: -1, clareza: 0 };
 
   let rms = 0;
   for (let i = 0; i < tamanho; i++) rms += buffer[i] * buffer[i];
   rms = Math.sqrt(rms / tamanho);
-  if (rms < 0.01) return -1; // silêncio ou ruído fraco demais
+  if (rms < 0.01) return invalida; // silêncio ou ruído fraco demais
 
   const limiar = 0.2;
   let inicio = 0;
@@ -70,7 +84,7 @@ function detectarFrequencia(buffer, sampleRate) {
 
   const recorte = buffer.slice(inicio, fim);
   const n = recorte.length;
-  if (n < 2) return -1;
+  if (n < 2) return invalida;
 
   const correlacao = new Array(n).fill(0);
   for (let defasagem = 0; defasagem < n; defasagem++) {
@@ -90,7 +104,14 @@ function detectarFrequencia(buffer, sampleRate) {
       melhorPos = i;
     }
   }
-  if (melhorPos <= 0 || melhorPos >= n - 1) return -1;
+  if (melhorPos <= 0 || melhorPos >= n - 1) return invalida;
+
+  // correlacao[0] é a autocorrelação em defasagem zero (a energia do
+  // trecho) — por Cauchy-Schwarz é sempre >= qualquer outro lag, então a
+  // razão do pico encontrado por ela mede o quão periódico o sinal
+  // realmente é (perto de 1 = tom limpo; perto de 0 = ruído/transiente)
+  const clareza = correlacao[0] > 0 ? melhorValor / correlacao[0] : 0;
+  if (clareza < CLAREZA_MINIMA) return invalida;
 
   // Interpolação parabólica em torno do pico para refinar o período
   let periodo = melhorPos;
@@ -101,7 +122,7 @@ function detectarFrequencia(buffer, sampleRate) {
   const b = (x3 - x1) / 2;
   if (a !== 0) periodo -= b / (2 * a);
 
-  return periodo > 0 ? sampleRate / periodo : -1;
+  return periodo > 0 ? { freq: sampleRate / periodo, clareza } : invalida;
 }
 
 // Tamanho do histórico de leituras válidas usado pra suavizar a frequência
@@ -109,11 +130,11 @@ function detectarFrequencia(buffer, sampleRate) {
 // leitura bruta da autocorrelação, que varia bastante de um frame pro outro
 // (ruído, harmônicos, o ataque da corda) e fazia a nota piscar/trocar rápido
 // demais mesmo tocando uma corda só
-const HISTORICO_TAMANHO = 8;
+const HISTORICO_TAMANHO = 10;
 // Não atualiza a nota exibida mais rápido que isso — a corda não muda de
 // verdade a esse ritmo, então atualizar a cada frame só deixa a leitura
 // bruta (com ruído) piscando na tela
-const INTERVALO_ATUALIZACAO_MS = 120;
+const INTERVALO_ATUALIZACAO_MS = 160;
 // Frames seguidos sem detecção válida até considerar "silêncio de verdade"
 // e limpar a nota — uma corda dedilhada tem altos e baixos naturais de
 // volume, então um único frame sem sinal não pode apagar a nota na hora
@@ -169,9 +190,13 @@ export default function Afinador() {
 
       const loop = () => {
         analiser.getFloatTimeDomainData(bufferRef.current);
-        const freqBruta = detectarFrequencia(bufferRef.current, ctx.sampleRate);
+        const { freq: freqBruta, clareza } = detectarFrequencia(bufferRef.current, ctx.sampleRate);
+        // clareza já vem filtrada pelo mínimo dentro de detectarFrequencia
+        // (freqBruta é -1 quando não passou) — a checagem aqui é só pra
+        // deixar explícito o que faz uma leitura "valer"
+        const leituraValida = freqBruta > 0 && clareza > 0;
 
-        if (freqBruta > 0) {
+        if (leituraValida) {
           framesSilencioRef.current = 0;
           const historico = historicoRef.current;
           historico.push(freqBruta);
