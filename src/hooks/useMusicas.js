@@ -5,18 +5,18 @@ import { useOcultos } from "./useOcultos";
 
 export function useMusicas() {
   const [todas, setTodas] = useState([]);
-  const [carregando, setCarregando] = useState(true);
+  const [carregandoMusicas, setCarregandoMusicas] = useState(true);
   const [erro, setErro] = useState(null);
-  const ocultos = useOcultos();
+  const { ocultos, carregando: carregandoOcultos } = useOcultos();
 
   const recarregar = useCallback(async () => {
     if (!supabaseConfigured) {
       setTodas(REPERTORIO_DEMO);
-      setCarregando(false);
+      setCarregandoMusicas(false);
       return;
     }
 
-    setCarregando(true);
+    setCarregandoMusicas(true);
     const { data, error } = await supabase
       .from("musicas")
       .select("id, nome, artista, estilo")
@@ -31,7 +31,7 @@ export function useMusicas() {
       setErro(null);
       setTodas(data ?? []);
     }
-    setCarregando(false);
+    setCarregandoMusicas(false);
   }, []);
 
   useEffect(() => {
@@ -52,6 +52,11 @@ export function useMusicas() {
   // Exposto pra SugestaoModal reconhecer quando alguém "sugere" uma música
   // que na verdade já é nossa, só está oculta no momento
   const musicasOcultas = todas.filter(estaOculta);
+
+  // Só considera "pronto" quando os dois fetches terminam — sem isso, se o
+  // repertório respondesse antes das ocultações ativas, a lista pública
+  // mostrava por um instante uma música que deveria estar escondida
+  const carregando = carregandoMusicas || carregandoOcultos;
 
   return { musicas, musicasOcultas, carregando, erro, recarregar };
 }

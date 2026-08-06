@@ -573,7 +573,9 @@ function Painel() {
       {aba === "gorjeta" && <AbaGorjeta />}
       {aba === "ocultar" && <AbaOcultar />}
       {aba === "playlists" && <AbaPlaylists />}
-      {aba === "pedidos" && <GerenciarPedidos onMudanca={contarPendentes} />}
+      {aba === "pedidos" && (
+        <GerenciarPedidos onMudanca={contarPendentes} cifraPorNome={cifraPorNome} />
+      )}
       {aba === "acessos" && <AbaAcessos />}
     </div>
   );
@@ -587,7 +589,8 @@ function NovoPedidoPopup({ pedido, cifraId, onFechar, onVerPedidos, onVerCifra }
     return () => clearTimeout(timer);
   }, [onFechar]);
 
-  const ehSugestao = pedido.pedido.startsWith("[Sugestão]");
+  const ehSugestao = pedido.pedido.startsWith(PREFIXO_SUGESTAO);
+  const ehOculta = pedido.pedido.startsWith(PREFIXO_OCULTA);
 
   return (
     <div
@@ -600,12 +603,15 @@ function NovoPedidoPopup({ pedido, cifraId, onFechar, onVerPedidos, onVerCifra }
       >
         <p className="text-4xl mb-2">🎶</p>
         <h3 className="section-title text-base mb-1">Pedido novo chegou!</h3>
-        <p className="text-cream text-lg mt-3 break-words">
-          {pedido.pedido.replace("[Sugestão]", "").trim()}
-        </p>
+        <p className="text-cream text-lg mt-3 break-words">{limparPrefixoPedido(pedido.pedido)}</p>
         {ehSugestao && (
           <p className="text-gold-300 text-xs mt-1 uppercase tracking-wider">
             fora do repertório
+          </p>
+        )}
+        {ehOculta && (
+          <p className="text-cream-muted text-xs mt-1 uppercase tracking-wider">
+            🙈 já é nossa, só oculta
           </p>
         )}
         {pedido.mensagem && (
@@ -737,9 +743,12 @@ function GerenciarMusicas() {
 
   const carregar = async () => {
     setCarregando(true);
+    // Só as colunas que esta aba de fato usa — cifra_cho pode ter alguns KB
+    // de texto por música, e select("*") trazia isso (e mais) toda vez que
+    // a aba recarregava, mesmo só usando cifra_cho como booleano aqui
     const { data, error } = await supabase
       .from("musicas")
-      .select("*")
+      .select("id, nome, artista, estilo, cifra_path, cifra_paginas, cifra_versao, cifra_cho")
       .order("nome")
       .order("artista");
     if (!error) setMusicas(data ?? []);
@@ -889,10 +898,11 @@ function GerenciarMusicas() {
       versao = null;
     }
 
-    const arquivosAntigos = arquivosDaCifra(m);
-    if (arquivosAntigos.length > 0) {
-      await supabase.storage.from("cifras").remove(arquivosAntigos);
-    }
+    // Vincula no banco ANTES de apagar os arquivos antigos do Storage — se
+    // o update falhar (ex.: sessão expirou no meio do upload), a música
+    // continua apontando pro cifra_path antigo, então ele precisa continuar
+    // existindo. A ordem inversa deixava a cifra quebrada (404) sempre que
+    // o update falhasse depois dos arquivos antigos já removidos.
     const { error: dbError } = await supabase
       .from("musicas")
       .update({
@@ -905,10 +915,18 @@ function GerenciarMusicas() {
     if (dbError) {
       console.error(dbError);
       setStatus("❌ Erro ao vincular a cifra.");
-    } else {
-      setStatus("✅ Cifra enviada!");
-      setTimeout(() => setStatus(""), 2500);
+      setEnviandoCifraId(null);
+      carregar();
+      return;
     }
+
+    const arquivosAntigos = arquivosDaCifra(m);
+    if (arquivosAntigos.length > 0) {
+      await supabase.storage.from("cifras").remove(arquivosAntigos);
+    }
+
+    setStatus("✅ Cifra enviada!");
+    setTimeout(() => setStatus(""), 2500);
     setEnviandoCifraId(null);
     carregar();
   };
@@ -3102,6 +3120,12 @@ function AbaPlaylists() {
   const [novoNome, setNovoNome] = useState("");
   const [buscaAdicionar, setBuscaAdicionar] = useState("");
   const [nomeEditando, setNomeEditando] = useState("");
+  // Trava mover/adicionar/remover enquanto uma dessas ações ainda está
+  // salvando — sem isso, clicar duas vezes rápido (ex.: ↑ ↑) faz a segunda
+  // chamada partir do mesmo estado "antigo" da primeira (fechado no
+  // closure de quando o botão foi clicado), e quem responder por último
+  // vence mesmo não sendo a mudança mais recente, perdendo a outra
+  const [salvandoOrdem, setSalvandoOrdem] = useState(false);
 
   const carregar = async () => {
     setCarregando(true);
@@ -3167,6 +3191,7 @@ function AbaPlaylists() {
   // se o servidor recusar, pra não deixar a tela mentindo sobre o que foi
   // salvo de verdade
   const salvarMusicas = async (playlistId, novaLista) => {
+    setSalvandoOrdem(true);
     setPlaylists((ps) =>
       ps.map((p) => (p.id === playlistId ? { ...p, musicas_ids: novaLista } : p))
     );
@@ -3179,6 +3204,7 @@ function AbaPlaylists() {
       setStatus("❌ Erro ao salvar — recarregando.");
       carregar();
     }
+    setSalvandoOrdem(false);
   };
 
   const renomear = async () => {
@@ -3197,12 +3223,12 @@ function AbaPlaylists() {
   };
 
   const adicionarMusica = (musicaId) => {
-    if (!playlistAberta || playlistAberta.musicas_ids.includes(musicaId)) return;
+    if (!playlistAberta || salvandoOrdem || playlistAberta.musicas_ids.includes(musicaId)) return;
     salvarMusicas(playlistAberta.id, [...playlistAberta.musicas_ids, musicaId]);
   };
 
   const removerMusica = (musicaId) => {
-    if (!playlistAberta) return;
+    if (!playlistAberta || salvandoOrdem) return;
     salvarMusicas(
       playlistAberta.id,
       playlistAberta.musicas_ids.filter((id) => id !== musicaId)
@@ -3210,7 +3236,7 @@ function AbaPlaylists() {
   };
 
   const moverMusica = (indice, direcao) => {
-    if (!playlistAberta) return;
+    if (!playlistAberta || salvandoOrdem) return;
     const alvo = indice + direcao;
     const lista = playlistAberta.musicas_ids;
     if (alvo < 0 || alvo >= lista.length) return;
@@ -3329,7 +3355,7 @@ function AbaPlaylists() {
                         </span>
                         <button
                           onClick={() => moverMusica(i, -1)}
-                          disabled={i === 0}
+                          disabled={i === 0 || salvandoOrdem}
                           aria-label="Mover para cima"
                           className="shrink-0 w-7 h-7 rounded-md border border-noir-700 text-cream-muted text-xs hover:text-gold-300 hover:border-gold-600 transition disabled:opacity-30 disabled:pointer-events-none"
                         >
@@ -3337,7 +3363,7 @@ function AbaPlaylists() {
                         </button>
                         <button
                           onClick={() => moverMusica(i, 1)}
-                          disabled={i === playlistAberta.musicas_ids.length - 1}
+                          disabled={i === playlistAberta.musicas_ids.length - 1 || salvandoOrdem}
                           aria-label="Mover para baixo"
                           className="shrink-0 w-7 h-7 rounded-md border border-noir-700 text-cream-muted text-xs hover:text-gold-300 hover:border-gold-600 transition disabled:opacity-30 disabled:pointer-events-none"
                         >
@@ -3345,8 +3371,9 @@ function AbaPlaylists() {
                         </button>
                         <button
                           onClick={() => removerMusica(id)}
+                          disabled={salvandoOrdem}
                           aria-label="Remover da playlist"
-                          className="shrink-0 w-7 h-7 rounded-md border border-noir-700 text-cream-muted text-xs hover:text-red-400 hover:border-red-900 transition"
+                          className="shrink-0 w-7 h-7 rounded-md border border-noir-700 text-cream-muted text-xs hover:text-red-400 hover:border-red-900 transition disabled:opacity-30 disabled:pointer-events-none"
                         >
                           ✕
                         </button>
@@ -3373,7 +3400,8 @@ function AbaPlaylists() {
                   <button
                     key={m.id}
                     onClick={() => adicionarMusica(m.id)}
-                    className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left hover:bg-noir-800 transition"
+                    disabled={salvandoOrdem}
+                    className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left hover:bg-noir-800 transition disabled:opacity-40 disabled:pointer-events-none"
                   >
                     <span className="min-w-0 truncate text-sm text-cream">
                       {m.nome} — {m.artista}
@@ -3754,14 +3782,13 @@ const dataCorteArquivo = () => {
   return d.toISOString();
 };
 
-function GerenciarPedidos({ onMudanca }) {
+function GerenciarPedidos({ onMudanca, cifraPorNome }) {
   const [pedidos, setPedidos] = useState([]);
   const [carregando, setCarregando] = useState(true);
   const [mostrar, setMostrar] = useState("pendentes"); // pendentes | atendidos | arquivados
   // Contagem separada (query leve, sem limite) — evita o badge dizer "12
   // pendentes" enquanto a lista, limitada, mostra só alguns deles
   const [contagens, setContagens] = useState({ pendentes: 0, atendidos: 0, arquivados: 0 });
-  const [cifraPorNome, setCifraPorNome] = useState({});
   const [pedidoAberto, setPedidoAberto] = useState(null);
   const [filtroDia, setFiltroDia] = useState(""); // Atendidos: um dia só
   const [filtroDe, setFiltroDe] = useState(""); // Arquivados: período
@@ -3839,20 +3866,8 @@ function GerenciarPedidos({ onMudanca }) {
     return true; // pendentes: sem filtro de data
   });
 
-  useEffect(() => {
-    // Mapa nome→cifra, para o botão "Ver cifra" no detalhe do pedido
-    supabase
-      .from("musicas")
-      .select("id, nome")
-      .or("cifra_path.not.is.null,cifra_cho.not.is.null")
-      .then(({ data, error }) => {
-        if (error) return;
-        const mapa = {};
-        for (const m of data ?? []) mapa[normalizarNome(m.nome)] = m.id;
-        setCifraPorNome(mapa);
-      });
-  }, []);
-
+  // Mapa nome→cifra vem de Painel (props) — evita disparar a mesma busca
+  // duas vezes (uma pro pop-up de pedido novo, outra só pra esta aba)
   const cifraDoPedido = (p) => cifraPorNome[normalizarNome(nomeDoPedido(p.pedido))];
 
   const alternarAtendido = async (p) => {

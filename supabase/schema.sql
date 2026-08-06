@@ -234,6 +234,17 @@ alter table public.musicas add column if not exists cifra_versao bigint;
 -- migração de uma cifra de PDF para .cho).
 alter table public.musicas add column if not exists cifra_cho text;
 
+-- As cifras são "restritas aos integrantes do duo" (ver Cifra.jsx) — mas
+-- isso até aqui era só um gate de UI: a policy "musicas: leitura publica"
+-- (using true, sem filtro de coluna) deixava cifra_path/cifra_paginas/
+-- cifra_versao/cifra_cho legíveis por QUALQUER UM via API REST direta com
+-- a anon key (que já é pública no bundle JS), sem passar pelo login nem
+-- pela tela. Mesma técnica já usada em "eventos" pra esconder cache/
+-- duracao do público: revoga o select geral do anon e libera de volta só
+-- as colunas que a página pública realmente usa.
+revoke select on table public.musicas from anon;
+grant select (id, nome, artista, estilo) on table public.musicas to anon;
+
 -- Bucket público para leitura (URLs estáveis = funciona offline no PWA);
 -- escrita somente autenticada.
 insert into storage.buckets (id, name, public)
