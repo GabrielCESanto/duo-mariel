@@ -898,6 +898,21 @@ function GerenciarMusicas() {
       versao = null;
     }
 
+    // Tenta converter o PDF pra ChordPro (texto com os acordes embutidos)
+    // — quando dá certo, Cifra.jsx passa a abrir o texto em vez do PDF/
+    // imagens, instantâneo. PDF de fonte quebrada ou escaneado não tem
+    // como converter no navegador (precisaria de OCR); nesse caso
+    // pdfParaChordPro devolve null e a cifra continua só em PDF, igual
+    // sempre funcionou.
+    let cifraCho = null;
+    try {
+      setStatus("⏳ Convertendo pra ChordPro...");
+      const { pdfParaChordPro } = await import("../lib/pdfParaCho");
+      cifraCho = await pdfParaChordPro(arquivo);
+    } catch (e) {
+      console.error("Falha ao converter o PDF pra ChordPro:", e);
+    }
+
     // Vincula no banco ANTES de apagar os arquivos antigos do Storage — se
     // o update falhar (ex.: sessão expirou no meio do upload), a música
     // continua apontando pro cifra_path antigo, então ele precisa continuar
@@ -909,6 +924,7 @@ function GerenciarMusicas() {
         cifra_path: path,
         cifra_paginas: totalPaginas || null,
         cifra_versao: versao,
+        cifra_cho: cifraCho, // null limpa uma conversão antiga se essa nova falhar
       })
       .eq("id", m.id);
 
@@ -925,37 +941,12 @@ function GerenciarMusicas() {
       await supabase.storage.from("cifras").remove(arquivosAntigos);
     }
 
-    setStatus("✅ Cifra enviada!");
-    setTimeout(() => setStatus(""), 2500);
-    setEnviandoCifraId(null);
-    carregar();
-  };
-
-  // Cifra em ChordPro (.cho): é só texto, guardado direto na linha da
-  // música — sem Storage, sem gerar imagem nenhuma, abre instantâneo
-  const enviarCho = async (m, arquivo) => {
-    if (!arquivo) return;
-    if (!arquivo.name.toLowerCase().endsWith(".cho")) {
-      setStatus("❌ Envie um arquivo .cho.");
-      return;
-    }
-
-    setEnviandoCifraId(m.id);
-    setStatus("⏳ Enviando .cho...");
-
-    const texto = await arquivo.text();
-    const { error } = await supabase
-      .from("musicas")
-      .update({ cifra_cho: texto })
-      .eq("id", m.id);
-
-    if (error) {
-      console.error(error);
-      setStatus("❌ Erro ao enviar o .cho.");
-    } else {
-      setStatus("✅ .cho enviado!");
-      setTimeout(() => setStatus(""), 2500);
-    }
+    setStatus(
+      cifraCho
+        ? "✅ Cifra enviada e convertida pra ChordPro!"
+        : "✅ Cifra enviada (não deu pra converter automaticamente — continua em PDF)."
+    );
+    setTimeout(() => setStatus(""), 3500);
     setEnviandoCifraId(null);
     carregar();
   };
@@ -1191,7 +1182,11 @@ function GerenciarMusicas() {
                 </div>
                 <div className="flex gap-2 shrink-0 flex-wrap justify-end">
                   <label
-                    title={m.cifra_path ? "Trocar o PDF da cifra" : "Enviar PDF da cifra"}
+                    title={
+                      m.cifra_path
+                        ? "Trocar o PDF da cifra (converte pra ChordPro automaticamente)"
+                        : "Enviar PDF da cifra (converte pra ChordPro automaticamente)"
+                    }
                     className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs transition cursor-pointer ${
                       m.cifra_path
                         ? "border-gold-600 text-gold-300 hover:bg-noir-800"
@@ -1212,32 +1207,6 @@ function GerenciarMusicas() {
                       className="hidden"
                       onChange={(e) => {
                         enviarCifra(m, e.target.files?.[0]);
-                        e.target.value = "";
-                      }}
-                    />
-                  </label>
-                  <label
-                    title={m.cifra_cho ? "Trocar o .cho da cifra" : "Enviar .cho da cifra"}
-                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs transition cursor-pointer ${
-                      m.cifra_cho
-                        ? "border-gold-600 text-gold-300 hover:bg-noir-800"
-                        : "border-noir-700 text-cream-muted hover:text-gold-300 hover:border-gold-600"
-                    } ${enviandoCifraId === m.id ? "opacity-50 pointer-events-none" : ""}`}
-                  >
-                    {enviandoCifraId === m.id ? (
-                      "⏳..."
-                    ) : (
-                      <>
-                        <Icone nome="anexo" className="w-3.5 h-3.5" />
-                        {m.cifra_cho ? "Trocar .cho" : ".cho"}
-                      </>
-                    )}
-                    <input
-                      type="file"
-                      accept=".cho,text/plain"
-                      className="hidden"
-                      onChange={(e) => {
-                        enviarCho(m, e.target.files?.[0]);
                         e.target.value = "";
                       }}
                     />
@@ -1587,7 +1556,7 @@ function AbaCifras() {
           {visiveis.length === 0 && (
             <li className="py-4 text-cream-muted text-sm">
               {musicas.length === 0
-                ? "Nenhuma cifra enviada ainda. Envie os PDFs ou .cho na aba Músicas (botões PDF / .cho)."
+                ? "Nenhuma cifra enviada ainda. Envie os PDFs na aba Músicas (botão PDF)."
                 : "Nenhuma cifra encontrada com esse filtro."}
             </li>
           )}

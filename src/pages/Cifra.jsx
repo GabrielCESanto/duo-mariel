@@ -424,7 +424,7 @@ export default function Cifra() {
         });
 
       if (!m.cifra_path && !m.cifra_cho) {
-        setErro("Essa música ainda não tem cifra. Envie o PDF ou o .cho na aba Músicas.");
+        setErro("Essa música ainda não tem cifra. Envie o PDF na aba Músicas.");
         setMusica(m);
         return;
       }
