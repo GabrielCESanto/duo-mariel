@@ -3,7 +3,12 @@ import { Link, useParams } from "react-router-dom";
 import * as pdfjs from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { supabase, supabaseConfigured } from "../lib/supabase";
-import { parseChordPro } from "../lib/chordpro";
+import {
+  parseChordPro,
+  transporTexto,
+  extrairCapoDoTexto,
+  definirCapoNoTexto,
+} from "../lib/chordpro";
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -40,6 +45,24 @@ function IconeOlho({ className = "w-5 h-5" }) {
     >
       <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z" />
       <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+// Ícone de lápis — abre/fecha o painel de tom/capotraste/edição do texto
+function IconeEditar({ className = "w-5 h-5" }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4L16.5 3.5z" />
     </svg>
   );
 }
@@ -117,9 +140,13 @@ export default function Cifra() {
   const { id } = useParams();
   const [sessao, setSessao] = useState(undefined); // undefined = verificando
   const [musica, setMusica] = useState(null);
-  // Blocos já parseados do .cho — null quando a cifra é PDF/imagens (ou
-  // ainda não carregou), preenchido só quando a música tem cifra_cho
-  const [choBlocos, setChoBlocos] = useState(null);
+  // Painel de tom/capotraste/edição do texto — só existe pra cifra em .cho
+  const [painelAberto, setPainelAberto] = useState(false);
+  const [transposicao, setTransposicao] = useState(0); // semitons, a partir do texto salvo
+  const [modoEdicao, setModoEdicao] = useState(false);
+  const [textoEdicao, setTextoEdicao] = useState("");
+  const [salvandoTexto, setSalvandoTexto] = useState(false);
+  const [statusEdicao, setStatusEdicao] = useState("");
   // id da entrada em "sugestoes" (aba Aprender) enquanto a música está
   // marcada para revisão; null quando não está marcada
   const [revisaoId, setRevisaoId] = useState(null);
@@ -357,7 +384,8 @@ export default function Cifra() {
     let timeoutId;
     const containerAtual = paginasRef.current;
     setErro("");
-    setChoBlocos(null); // limpa a cifra em texto da música anterior, se houver
+    setTransposicao(0); // volta o "Tom" ao original da música que está abrindo
+    setModoEdicao(false);
 
     // Baixa e renderiza o PDF direto — usado tanto pra cifras antigas (sem
     // imagens pré-geradas) quanto como reserva, se as imagens prontas de
@@ -431,9 +459,8 @@ export default function Cifra() {
       setMusica(m);
 
       if (m.cifra_cho) {
-        // Cifra em ChordPro: não tem PDF pra renderizar, é só parsear o
-        // texto e exibir — abre instantâneo, sem pdf.js nenhum
-        setChoBlocos(parseChordPro(m.cifra_cho).blocos);
+        // Cifra em ChordPro: não tem PDF pra renderizar (o texto é
+        // parseado direto no corpo do componente, a partir de musica.cifra_cho)
         setRenderizando(false);
         return;
       }
@@ -646,6 +673,51 @@ export default function Cifra() {
     setRevisaoId(data.id);
   };
 
+  // --- Tom/capotraste/edição do texto (só existe pra cifra em .cho) ---
+  // textoExibido é sempre calculado a partir do texto SALVO (nunca de uma
+  // transposição anterior) — evita transpor em cima de transposição já
+  // aplicada se o usuário clicar +/- várias vezes
+  const textoBase = musica?.cifra_cho ?? null;
+  const textoExibido = transposicao ? transporTexto(textoBase, transposicao) : textoBase;
+  const choBlocos = textoExibido ? parseChordPro(textoExibido).blocos : null;
+  const capoAtual = extrairCapoDoTexto(textoBase);
+
+  // Grava um novo texto em cifra_cho — usado tanto por "Salvar tom" quanto
+  // por mudar o capotraste e pelo modo de edição livre
+  const salvarCifraCho = async (novoTexto) => {
+    setSalvandoTexto(true);
+    setStatusEdicao("⏳ Salvando...");
+    const { error } = await supabase.from("musicas").update({ cifra_cho: novoTexto }).eq("id", id);
+    if (error) {
+      console.error(error);
+      setStatusEdicao("❌ Erro ao salvar.");
+    } else {
+      setMusica((m) => ({ ...m, cifra_cho: novoTexto }));
+      setTransposicao(0); // já virou o novo "0" — a transposição foi incorporada ao texto
+      setStatusEdicao("✅ Salvo!");
+      setTimeout(() => setStatusEdicao(""), 2000);
+    }
+    setSalvandoTexto(false);
+  };
+
+  const mudarCapo = (novaCasa) => {
+    if (!textoBase || salvandoTexto) return;
+    salvarCifraCho(definirCapoNoTexto(textoBase, novaCasa));
+  };
+
+  const abrirEdicao = () => {
+    setTextoEdicao(
+      textoExibido ?? `{title: ${musica?.nome ?? ""}}\n{artist: ${musica?.artista ?? ""}}\n\n`
+    );
+    setModoEdicao(true);
+    setRodando(false);
+  };
+
+  const salvarEdicao = async () => {
+    await salvarCifraCho(textoEdicao);
+    setModoEdicao(false);
+  };
+
   if (sessao === undefined) {
     return (
       <p className="text-cream-muted text-center py-20">Verificando acesso...</p>
@@ -681,7 +753,7 @@ export default function Cifra() {
             </Link>
           </div>
 
-          {!erro && (
+          {!erro && !modoEdicao && (
             <>
               <div className="flex items-center gap-2 md:gap-3 justify-self-center">
                 <button
@@ -775,12 +847,93 @@ export default function Cifra() {
               </>
             )}
           </div>
-          {mostrarInfoRapida && (
-            <span className="absolute right-1 text-cream-muted/50 text-xs md:text-sm transition-opacity">
-              ({Math.round(zoom * 100)}% • {velocidade}px/s)
-            </span>
-          )}
+          <div className="absolute right-1 flex items-center gap-2 md:gap-3">
+            {mostrarInfoRapida && !modoEdicao && (
+              <span className="text-cream-muted/50 text-xs md:text-sm transition-opacity">
+                ({Math.round(zoom * 100)}% • {velocidade}px/s)
+              </span>
+            )}
+            {choBlocos && !modoEdicao && (
+              <button
+                onClick={() => setPainelAberto((v) => !v)}
+                aria-label={painelAberto ? "Ocultar tom, capotraste e edição" : "Tom, capotraste e edição"}
+                title="Tom, capotraste e edição do texto"
+                className={`shrink-0 transition ${
+                  painelAberto ? "text-gold-400" : "text-noir-600 hover:text-gold-300"
+                }`}
+              >
+                <IconeEditar className="w-5 h-5 md:w-6 md:h-6" />
+              </button>
+            )}
+          </div>
         </div>
+
+        {painelAberto && choBlocos && !modoEdicao && (
+          <div className="mt-3 pt-3 border-t border-noir-800 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-sm">
+            <div className="flex items-center gap-2">
+              <span className="text-cream-muted text-[11px] uppercase tracking-wider">Tom</span>
+              <button
+                onClick={() => setTransposicao((t) => Math.max(-11, t - 1))}
+                aria-label="Baixar o tom"
+                className="w-8 h-8 rounded-lg border border-noir-700 text-cream hover:border-gold-600 transition"
+              >
+                −
+              </button>
+              <span className="w-8 text-center text-gold-300 tabular-nums">
+                {transposicao > 0 ? `+${transposicao}` : transposicao}
+              </span>
+              <button
+                onClick={() => setTransposicao((t) => Math.min(11, t + 1))}
+                aria-label="Subir o tom"
+                className="w-8 h-8 rounded-lg border border-noir-700 text-cream hover:border-gold-600 transition"
+              >
+                +
+              </button>
+              {transposicao !== 0 && (
+                <button
+                  onClick={() => salvarCifraCho(textoExibido)}
+                  disabled={salvandoTexto}
+                  className="ml-1 px-3 py-1.5 rounded-lg border border-gold-600 text-gold-300 text-xs hover:bg-noir-800 transition disabled:opacity-50"
+                >
+                  Salvar tom
+                </button>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="text-cream-muted text-[11px] uppercase tracking-wider">Capotraste</span>
+              <button
+                onClick={() => mudarCapo(Math.max(0, capoAtual - 1))}
+                disabled={salvandoTexto || capoAtual === 0}
+                aria-label="Diminuir a casa do capotraste"
+                className="w-8 h-8 rounded-lg border border-noir-700 text-cream hover:border-gold-600 transition disabled:opacity-30 disabled:pointer-events-none"
+              >
+                −
+              </button>
+              <span className="w-16 text-center text-gold-300 tabular-nums">
+                {capoAtual > 0 ? `${capoAtual}ª casa` : "sem"}
+              </span>
+              <button
+                onClick={() => mudarCapo(Math.min(11, capoAtual + 1))}
+                disabled={salvandoTexto}
+                aria-label="Aumentar a casa do capotraste"
+                className="w-8 h-8 rounded-lg border border-noir-700 text-cream hover:border-gold-600 transition disabled:opacity-50"
+              >
+                +
+              </button>
+            </div>
+
+            <button
+              onClick={abrirEdicao}
+              className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg border border-noir-700 text-cream-muted text-xs hover:text-gold-300 hover:border-gold-600 transition"
+            >
+              <IconeEditar className="w-3.5 h-3.5" />
+              Editar texto
+            </button>
+
+            {statusEdicao && <span className="text-cream-muted text-xs">{statusEdicao}</span>}
+          </div>
+        )}
       </header>
 
       {/* Área do PDF — toque alterna play/pause; pinça com 2 dedos dá zoom */}
@@ -791,7 +944,7 @@ export default function Cifra() {
             pinchOcorreuRef.current = false;
             return;
           }
-          if (!erro) setRodando((r) => !r);
+          if (!erro && !modoEdicao) setRodando((r) => !r);
         }}
         onTouchStart={(e) => {
           if (e.touches.length >= 2) {
@@ -847,6 +1000,35 @@ export default function Cifra() {
             >
               🔄 Tentar de novo
             </button>
+          </div>
+        ) : modoEdicao ? (
+          <div
+            className="max-w-2xl mx-auto h-full flex flex-col gap-3 cursor-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <textarea
+              className="input-noir flex-1 resize-none font-mono text-sm leading-relaxed"
+              value={textoEdicao}
+              onChange={(e) => setTextoEdicao(e.target.value)}
+              spellCheck={false}
+              autoFocus
+            />
+            <div className="flex items-center gap-3 justify-end shrink-0 pb-1">
+              {statusEdicao && <span className="text-cream-muted text-xs mr-auto">{statusEdicao}</span>}
+              <button
+                onClick={() => setModoEdicao(false)}
+                className="px-4 py-2 rounded-xl border border-noir-700 text-sm text-cream-muted hover:text-cream transition"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={salvarEdicao}
+                disabled={salvandoTexto}
+                className="btn-gold px-5 py-2 rounded-xl text-sm disabled:opacity-60"
+              >
+                Salvar
+              </button>
+            </div>
           </div>
         ) : (
           <>

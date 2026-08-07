@@ -10,18 +10,18 @@ verdade, nao vale subir um .cho pela metade).
 Por padrao roda em modo SIMULACAO (nao grava nada, so mostra o que faria).
 Passe --aplicar pra gravar de verdade.
 
-Precisa de duas variaveis de ambiente (NUNCA cole a chave no codigo nem em
-nenhum arquivo do repo):
-  SUPABASE_URL               -- ex.: https://xxxx.supabase.co
-  SUPABASE_SERVICE_ROLE_KEY  -- Dashboard > Project Settings > API >
-                                 service_role. Essa chave ignora TODA a
-                                 seguranca do banco (RLS) -- trate como
-                                 senha de root, nunca comite, nunca
-                                 compartilhe, nunca cole em chat.
+Precisa de SUPABASE_URL (ou VITE_SUPABASE_URL) e SUPABASE_SERVICE_ROLE_KEY.
+Le automaticamente do .env na raiz do projeto se essas variaveis nao
+estiverem definidas no ambiente -- NUNCA cole a chave no codigo nem em
+nenhum arquivo do repo (o .env ja e ignorado pelo git, mantenha assim).
 
-Uso (PowerShell):
-  $env:SUPABASE_URL = "https://xxxx.supabase.co"
-  $env:SUPABASE_SERVICE_ROLE_KEY = "sua-service-role-key"
+  SUPABASE_SERVICE_ROLE_KEY -- Dashboard > Project Settings > API >
+                                service_role. Essa chave ignora TODA a
+                                seguranca do banco (RLS) -- trate como
+                                senha de root, nunca comite, nunca
+                                compartilhe, nunca cole em chat.
+
+Uso:
   py scripts/subir_cho_em_lote.py              # simula, nao grava
   py scripts/subir_cho_em_lote.py --aplicar    # grava de verdade
 """
@@ -36,6 +36,24 @@ import urllib.request
 
 BASE = r"e:\Estudos e Projetos\Site Duo Mariel\Repertório\Repertório"
 RELATORIO = os.path.join(os.path.dirname(__file__), "relatorio_lote.csv")
+ENV_PATH = os.path.join(os.path.dirname(__file__), "..", ".env")
+
+
+def carregar_env_local():
+    """Le KEY=valor (ou KEY = valor) do .env na raiz -- so preenche o que
+    ainda nao estiver definido no ambiente de verdade, pra uma variavel
+    exportada na mao continuar tendo prioridade."""
+    if not os.path.exists(ENV_PATH):
+        return
+    with open(ENV_PATH, encoding="utf-8") as f:
+        for linha in f:
+            linha = linha.strip()
+            if not linha or linha.startswith("#") or "=" not in linha:
+                continue
+            chave, valor = linha.split("=", 1)
+            chave, valor = chave.strip(), valor.strip()
+            if chave and chave not in os.environ:
+                os.environ[chave] = valor
 
 
 def normalizar(nome):
@@ -90,10 +108,11 @@ def atualizar_cifra_cho(url, chave, musica_id, texto):
 def main():
     aplicar = "--aplicar" in sys.argv
 
-    url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+    carregar_env_local()
+    url = (os.environ.get("SUPABASE_URL") or os.environ.get("VITE_SUPABASE_URL") or "").rstrip("/")
     chave = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
     if not url or not chave:
-        print("Defina SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY antes de rodar (ver docstring).")
+        print("Defina SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY (ambiente ou .env) antes de rodar.")
         sys.exit(1)
 
     nomes_ok = carregar_nomes_ok()
