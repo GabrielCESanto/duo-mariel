@@ -870,40 +870,15 @@ function GerenciarMusicas() {
       return;
     }
 
-    // Gera e sobe as imagens das páginas agora, uma única vez — assim quem
-    // abrir a cifra no celular só baixa imagens prontas, sem precisar
-    // renderizar o PDF na hora (o que era lento e, em aparelhos mais
-    // fracos, arriscado). Se isso falhar, a cifra ainda funciona — Cifra.jsx
-    // cai pro PDF direto, só sem a abertura rápida.
-    let totalPaginas = 0;
-    let versao = null;
-    try {
-      // Import dinâmico: pdf.js é pesado, só baixa quando alguém realmente
-      // for enviar/reprocessar uma cifra, não pra qualquer visitante do site
-      const { pdfParaImagensJpeg } = await import("../lib/pdfParaImagens");
-      const imagens = await pdfParaImagensJpeg(arquivo, (atual, total) => {
-        setStatus(`⏳ Preparando página ${atual}/${total}...`);
-      });
-      versao = Date.now();
-      for (let i = 0; i < imagens.length; i++) {
-        const { error: imgError } = await subirImagemPagina(
-          caminhoImagemPagina(m.id, versao, i + 1),
-          imagens[i]
-        );
-        if (imgError) throw imgError;
-      }
-      totalPaginas = imagens.length;
-    } catch (e) {
-      console.error("Falha ao gerar imagens das páginas da cifra:", e);
-      versao = null;
-    }
-
-    // Tenta converter o PDF pra ChordPro (texto com os acordes embutidos)
-    // — quando dá certo, Cifra.jsx passa a abrir o texto em vez do PDF/
-    // imagens, instantâneo. PDF de fonte quebrada ou escaneado não tem
-    // como converter no navegador (precisaria de OCR); nesse caso
-    // pdfParaChordPro devolve null e a cifra continua só em PDF, igual
-    // sempre funcionou.
+    // Tenta converter o PDF pra ChordPro primeiro — quando dá certo,
+    // Cifra.jsx abre o texto direto, instantâneo, sem PDF nem imagem
+    // nenhuma envolvida, então nem vale a pena gerar as imagens de página
+    // (só ficariam órfãs no Storage, sem nunca aparecer pra ninguém — foi
+    // exatamente isso que aconteceu com o lote anterior, tivemos que
+    // limpar depois). PDF de fonte quebrada ou escaneado não tem como
+    // converter no navegador (precisaria de OCR); nesse caso
+    // pdfParaChordPro devolve null e cai no caminho de baixo, que gera as
+    // imagens — a cifra continua funcionando, só em PDF/imagem mesmo.
     let cifraCho = null;
     try {
       setStatus("⏳ Convertendo pra ChordPro...");
@@ -911,6 +886,32 @@ function GerenciarMusicas() {
       cifraCho = await pdfParaChordPro(arquivo);
     } catch (e) {
       console.error("Falha ao converter o PDF pra ChordPro:", e);
+    }
+
+    let totalPaginas = 0;
+    let versao = null;
+    if (!cifraCho) {
+      try {
+        // Import dinâmico: pdf.js é pesado, só baixa quando alguém
+        // realmente for enviar uma cifra que não converteu, não pra
+        // qualquer visitante do site
+        const { pdfParaImagensJpeg } = await import("../lib/pdfParaImagens");
+        const imagens = await pdfParaImagensJpeg(arquivo, (atual, total) => {
+          setStatus(`⏳ Preparando página ${atual}/${total}...`);
+        });
+        versao = Date.now();
+        for (let i = 0; i < imagens.length; i++) {
+          const { error: imgError } = await subirImagemPagina(
+            caminhoImagemPagina(m.id, versao, i + 1),
+            imagens[i]
+          );
+          if (imgError) throw imgError;
+        }
+        totalPaginas = imagens.length;
+      } catch (e) {
+        console.error("Falha ao gerar imagens das páginas da cifra:", e);
+        versao = null;
+      }
     }
 
     // Vincula no banco ANTES de apagar os arquivos antigos do Storage — se
@@ -1346,7 +1347,6 @@ function AbaCifras() {
   const [progresso, setProgresso] = useState(() => estadoDownloadCifras());
   const [modalAberto, setModalAberto] = useState(false);
   const [armazenamentoPersistente, setArmazenamentoPersistente] = useState(null); // null = verificando
-  const [reprocessando, setReprocessando] = useState(null); // { atual, total, nome } ou null
   const [soFavoritas, setSoFavoritas] = useState(false);
   const navigate = useNavigate();
 
@@ -1412,71 +1412,11 @@ function AbaCifras() {
     }
   };
 
-  // Cifras enviadas antes dessa funcionalidade só têm o PDF — abrem devagar
-  // porque o celular precisa renderizar o PDF na hora. Esse botão gera as
-  // imagens pra elas também, sem precisar reenviar o PDF de novo.
-  // Só músicas com PDF entram aqui — cifras em .cho não têm imagem nenhuma
-  // pra gerar (o texto já abre instantâneo, sem PDF envolvido)
-  const semImagens = musicas.filter((m) => m.cifra_path && (!m.cifra_paginas || !m.cifra_versao));
-
-  const reprocessarCifrasAntigas = async () => {
-    if (semImagens.length === 0 || reprocessando) return;
-    const { pdfParaImagensJpeg } = await import("../lib/pdfParaImagens");
-    for (const [i, m] of semImagens.entries()) {
-      setReprocessando({ atual: i + 1, total: semImagens.length, nome: m.nome });
-      try {
-        // Um lote longo pode passar do tempo de vida do token de sessão —
-        // isso reconecta se estiver perto de expirar, evitando falhas de
-        // RLS no meio do reprocessamento
-        await supabase.auth.getSession();
-        const { data: pub } = supabase.storage.from("cifras").getPublicUrl(m.cifra_path);
-        const imagens = await pdfParaImagensJpeg(pub.publicUrl);
-        const versao = Date.now();
-        for (let p = 0; p < imagens.length; p++) {
-          const { error } = await subirImagemPagina(
-            caminhoImagemPagina(m.id, versao, p + 1),
-            imagens[p]
-          );
-          if (error) throw error;
-        }
-        await supabase
-          .from("musicas")
-          .update({ cifra_paginas: imagens.length, cifra_versao: versao })
-          .eq("id", m.id);
-      } catch (e) {
-        console.error(`Falha ao reprocessar "${m.nome}":`, e);
-      }
-      // Respira entre uma música e outra — processar várias em sequência
-      // sem pausa é o que fazia páginas mais à frente no lote estourarem o
-      // timeout de segurança
-      await new Promise((resolve) => setTimeout(resolve, 300));
-    }
-    setReprocessando(null);
-    carregar();
-  };
-
   return (
     <div className="border border-noir-700 rounded-2xl p-5 bg-noir-900/50">
       <div className="flex items-center justify-between gap-4 mb-3 flex-wrap">
         <h2 className="section-title text-sm">Cifras ({musicas.length})</h2>
         <div className="flex gap-2 flex-wrap">
-          {semImagens.length > 0 && (
-            <button
-              onClick={reprocessarCifrasAntigas}
-              disabled={!!reprocessando}
-              title="Gera as imagens das páginas pras cifras enviadas antes dessa funcionalidade existir — deixa a abertura no celular bem mais rápida"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gold-600 text-xs text-gold-300 hover:bg-noir-800 transition disabled:opacity-40"
-            >
-              {reprocessando ? (
-                `⏳ ${reprocessando.atual}/${reprocessando.total}...`
-              ) : (
-                <>
-                  <Icone nome="reprocessar" className="w-3.5 h-3.5" />
-                  Acelerar cifras antigas ({semImagens.length})
-                </>
-              )}
-            </button>
-          )}
           <button
             onClick={cliqueBaixar}
             disabled={musicas.length === 0}
