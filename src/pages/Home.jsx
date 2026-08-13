@@ -263,6 +263,20 @@ export default function Home() {
           </button>
         )}
 
+        {/* PLAYLIST DE EVENTO — quem contratou o duo escolhe as músicas do show */}
+        <section className="border border-noir-700 rounded-2xl p-6 mt-10 bg-noir-900/50 text-center">
+          <h2 className="section-title text-lg mb-1">Contratou o Duo Mariel?</h2>
+          <p className="text-sm text-cream-muted mb-4">
+            Monte a playlist do seu evento — escolha as músicas que quer ouvir no seu show.
+          </p>
+          <Link
+            to="/evento"
+            className="btn-gold px-6 py-3 rounded-xl text-sm inline-flex items-center gap-2"
+          >
+            🎵 Montar playlist do meu evento
+          </Link>
+        </section>
+
         {/* AGENDA */}
         <Agenda />
 

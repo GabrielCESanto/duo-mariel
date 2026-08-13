@@ -20,6 +20,13 @@ Edge Function) + GitHub Pages (hospedagem gratuita).
 - **Agenda de shows:** lista de próximos shows na página pública, gerenciada
   pela aba **Agenda** da área admin (com cachê e tempo de apresentação
   visíveis só para o duo).
+- **Playlist de evento:** botão acima da Agenda, na página pública, leva
+  quem contratou o duo a escolher o evento dela e entrar com uma senha
+  única (passada por vocês, gerenciada na aba **Playlist evento** do
+  admin). Depois de entrar, ela busca músicas pelo nome ou artista (API do
+  iTunes) e monta a lista do que quer ouvir no show — pode remover a
+  qualquer momento. O admin acompanha e modera a playlist de cada evento
+  na mesma aba.
 - **Área do músico** (`/#/admin`): login restrito (Supabase Auth) para você e
   sua parceira adicionarem/editarem/excluírem músicas e gerenciarem pedidos —
   sem precisar mexer em código nem rebuildar o site.
@@ -70,6 +77,12 @@ npx supabase functions deploy pedido --no-verify-jwt
 
 (Ou cole o conteúdo de `supabase/functions/pedido/index.ts` no editor de
 Edge Functions do Dashboard e clique em Deploy.)
+
+A mesma função também atende a playlist de evento (login com senha, listar,
+adicionar e remover músicas) — já incluída no arquivo acima, sem passo
+extra. A senha padrão inicial é `trocaressa` (definida em
+`supabase/schema.sql`); troque na aba **Playlist evento** do admin antes de
+divulgar o recurso.
 
 ### 3. GitHub Pages
 

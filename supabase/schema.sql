@@ -450,6 +450,69 @@ create policy "playlists: delete autenticado"
   to authenticated
   using (true);
 
+-- ---------- PLAYLIST DE EVENTO (pedidos do cliente contratante) ----------
+-- Ferramenta pública, mas protegida por senha: quem contratou o duo escolhe
+-- o show na agenda (botão acima da Agenda, na página pública) e, com a
+-- senha combinada, monta a playlist de músicas que quer ouvir no evento.
+-- Diferente de "playlists" (roteiro interno do duo, só com músicas do
+-- próprio repertório): aqui o contratante pode pedir QUALQUER música
+-- encontrada no iTunes, não só as que o duo já toca.
+create table if not exists public.pedidos_evento (
+  id uuid primary key default gen_random_uuid(),
+  evento_id uuid not null references public.eventos(id) on delete cascade,
+  nome text not null,
+  artista text not null,
+  capa text,
+  itunes_track_id bigint,
+  preview_url text,
+  created_at timestamptz not null default now()
+);
+
+alter table public.pedidos_evento enable row level security;
+
+-- Sem policy nenhuma pro anon: o visitante só lê/insere/remove passando
+-- pela Edge Function (tipo evento_login/evento_lista/evento_add/
+-- evento_remover), que confere a senha no servidor com a service role
+-- (ignora RLS). Assim, mesmo com a anon key pública no bundle JS, ninguém
+-- acessa a playlist de um evento sem saber a senha certa. Só o admin
+-- logado (authenticated) vê/gerencia tudo direto, pra moderar/consultar.
+drop policy if exists "pedidos_evento: select autenticado" on public.pedidos_evento;
+create policy "pedidos_evento: select autenticado"
+  on public.pedidos_evento for select
+  to authenticated
+  using (true);
+
+drop policy if exists "pedidos_evento: delete autenticado" on public.pedidos_evento;
+create policy "pedidos_evento: delete autenticado"
+  on public.pedidos_evento for delete
+  to authenticated
+  using (true);
+
+-- Senha única, compartilhada entre todos os eventos (mesma senha pra cada
+-- contratante — não precisa ser uma por evento). Troque quando quiser em
+-- Menu > Playlist evento, na área do músico. O anon nunca acessa esta
+-- tabela: só a Edge Function (service role) lê pra conferir o login.
+create table if not exists public.evento_config (
+  id boolean primary key default true,
+  senha text not null default 'trocaressa',
+  constraint evento_config_singleton check (id)
+);
+insert into public.evento_config (id) values (true) on conflict (id) do nothing;
+
+alter table public.evento_config enable row level security;
+
+drop policy if exists "evento_config: select autenticado" on public.evento_config;
+create policy "evento_config: select autenticado"
+  on public.evento_config for select
+  to authenticated
+  using (true);
+
+drop policy if exists "evento_config: update autenticado" on public.evento_config;
+create policy "evento_config: update autenticado"
+  on public.evento_config for update
+  to authenticated
+  using (true);
+
 -- ---------- (Opcional) Repertório inicial ----------
 -- insert into public.musicas (nome, artista, estilo) values
 --   ('Trevo (Tu)', 'Anavitória', 'MPB'),

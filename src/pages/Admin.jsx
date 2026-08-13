@@ -194,6 +194,7 @@ const ABAS_OUTROS = [
   ["afinador", "Afinador"],
   ["agenda", "Agenda"],
   ["aprender", "Aprender"],
+  ["evento", "Playlist evento"],
   ["gorjeta", "Gorjeta"],
   ["musicas", "Músicas"],
   ["ocultar", "Ocultar"],
@@ -374,6 +375,14 @@ function Icone({ nome, className = "w-5 h-5" }) {
           <line x1="8" y1="12" x2="20" y2="12" />
           <circle cx="4" cy="18" r="1.3" fill="currentColor" stroke="none" />
           <line x1="8" y1="18" x2="16" y2="18" />
+        </svg>
+      );
+    case "evento":
+      return (
+        <svg {...props}>
+          <rect x="5" y="11" width="14" height="9" rx="2" />
+          <path d="M8 11V7a4 4 0 018 0v4" />
+          <circle cx="12" cy="15.5" r="1.3" fill="currentColor" stroke="none" />
         </svg>
       );
     default:
@@ -568,6 +577,7 @@ function Painel() {
       {aba === "cifras" && <AbaCifras />}
       {aba === "aprender" && <GerenciarSugestoes />}
       {aba === "agenda" && <GerenciarAgenda />}
+      {aba === "evento" && <AbaEventoCliente />}
       {aba === "afinador" && <Afinador />}
       {aba === "videos" && <GerenciarVideos />}
       {aba === "gorjeta" && <AbaGorjeta />}
@@ -2463,6 +2473,192 @@ function GerenciarAgenda() {
           </ul>
         )}
       </div>
+    </div>
+  );
+}
+
+/* ------------------------- PLAYLIST DE EVENTO ------------------------- */
+// Senha compartilhada (mesma pra todos os contratantes) + visão/moderação
+// das músicas que cada evento recebeu na página pública /evento.
+function AbaEventoCliente() {
+  const [senha, setSenha] = useState("");
+  const [senhaSalva, setSenhaSalva] = useState("");
+  const [carregandoSenha, setCarregandoSenha] = useState(true);
+  const [statusSenha, setStatusSenha] = useState("");
+
+  const [eventos, setEventos] = useState([]);
+  const [contagens, setContagens] = useState({}); // evento_id -> quantidade de músicas
+  const [carregandoEventos, setCarregandoEventos] = useState(true);
+  const [eventoAbertoId, setEventoAbertoId] = useState(null);
+  const [musicasEvento, setMusicasEvento] = useState([]);
+  const [carregandoMusicas, setCarregandoMusicas] = useState(false);
+
+  useEffect(() => {
+    supabase
+      .from("evento_config")
+      .select("senha")
+      .eq("id", true)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (!error && data) {
+          setSenha(data.senha);
+          setSenhaSalva(data.senha);
+        }
+        setCarregandoSenha(false);
+      });
+  }, []);
+
+  const carregarEventos = async () => {
+    setCarregandoEventos(true);
+    const [{ data: evs, error: e1 }, { data: pedidos, error: e2 }] = await Promise.all([
+      supabase.from("eventos").select("id, titulo, data, local").order("data", { ascending: false }),
+      supabase.from("pedidos_evento").select("evento_id"),
+    ]);
+    if (!e1) setEventos(evs ?? []);
+    if (!e2) {
+      const mapa = {};
+      for (const p of pedidos ?? []) mapa[p.evento_id] = (mapa[p.evento_id] ?? 0) + 1;
+      setContagens(mapa);
+    }
+    setCarregandoEventos(false);
+  };
+
+  useEffect(() => {
+    carregarEventos();
+  }, []);
+
+  const salvarSenha = async (e) => {
+    e.preventDefault();
+    const nova = senha.trim();
+    if (!nova) return;
+    setStatusSenha("⏳ Salvando...");
+    const { error } = await supabase.from("evento_config").update({ senha: nova }).eq("id", true);
+    if (error) {
+      console.error(error);
+      setStatusSenha("❌ Erro ao salvar.");
+      return;
+    }
+    setSenhaSalva(nova);
+    setStatusSenha("✅ Senha atualizada!");
+    setTimeout(() => setStatusSenha(""), 2500);
+  };
+
+  const abrirEvento = async (ev) => {
+    setEventoAbertoId(ev.id);
+    setCarregandoMusicas(true);
+    const { data, error } = await supabase
+      .from("pedidos_evento")
+      .select("id, nome, artista, capa, preview_url, created_at")
+      .eq("evento_id", ev.id)
+      .order("created_at");
+    if (!error) setMusicasEvento(data ?? []);
+    setCarregandoMusicas(false);
+  };
+
+  const removerMusica = async (m) => {
+    if (!window.confirm(`Remover "${m.nome} — ${m.artista}" da playlist?`)) return;
+    const { error } = await supabase.from("pedidos_evento").delete().eq("id", m.id);
+    if (error) {
+      console.error(error);
+      return;
+    }
+    setMusicasEvento((lista) => lista.filter((x) => x.id !== m.id));
+    setContagens((c) => ({ ...c, [eventoAbertoId]: Math.max(0, (c[eventoAbertoId] ?? 1) - 1) }));
+  };
+
+  const eventoAberto = eventos.find((e) => e.id === eventoAbertoId) ?? null;
+
+  return (
+    <div className="space-y-6">
+      {/* Senha compartilhada */}
+      <div className="border border-noir-700 rounded-2xl p-5 bg-noir-900/50 max-w-xl">
+        <h2 className="section-title text-sm mb-1">Playlist de evento</h2>
+        <p className="text-xs text-cream-muted mb-4">
+          Senha única que você passa pra quem contratou o show — com ela, a
+          pessoa escolhe o evento dela na página pública (botão acima da
+          Agenda) e monta a playlist de músicas que quer ouvir.
+        </p>
+        {carregandoSenha ? (
+          <p className="text-cream-muted text-sm">Carregando...</p>
+        ) : (
+          <form onSubmit={salvarSenha} className="flex gap-2">
+            <input
+              className="input-noir"
+              value={senha}
+              onChange={(e) => setSenha(e.target.value)}
+              placeholder="Senha"
+            />
+            <button
+              type="submit"
+              disabled={senha.trim() === senhaSalva || !senha.trim()}
+              className="btn-gold px-5 py-2.5 rounded-xl text-sm shrink-0 disabled:opacity-50"
+            >
+              Salvar
+            </button>
+          </form>
+        )}
+        {statusSenha && <p className="text-sm text-cream-muted mt-2">{statusSenha}</p>}
+      </div>
+
+      {/* Eventos e suas playlists */}
+      <div className="border border-noir-700 rounded-2xl p-5 bg-noir-900/50">
+        <h2 className="section-title text-sm mb-4">Playlists por evento</h2>
+        {carregandoEventos ? (
+          <p className="text-cream-muted text-sm py-4">Carregando...</p>
+        ) : eventos.length === 0 ? (
+          <p className="text-cream-muted text-sm py-4">Nenhum show cadastrado ainda.</p>
+        ) : (
+          <ul className="divide-y divide-noir-800 max-h-[320px] overflow-y-auto pr-2">
+            {eventos.map((ev) => (
+              <li key={ev.id} className="py-3">
+                <button
+                  onClick={() => abrirEvento(ev)}
+                  className={`min-w-0 w-full text-left ${
+                    eventoAbertoId === ev.id ? "text-gold-300" : "text-cream hover:text-gold-300"
+                  } transition`}
+                >
+                  <p className="truncate">{ev.titulo}</p>
+                  <p className="text-cream-muted text-xs mt-0.5">
+                    {formatarDataCurta(ev.data)}
+                    {ev.local ? ` • ${ev.local}` : ""} • {contagens[ev.id] ?? 0} música(s) pedida(s)
+                  </p>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {eventoAberto && (
+        <div className="border border-noir-700 rounded-2xl p-5 bg-noir-900/50">
+          <h2 className="section-title text-sm mb-4">Playlist — {eventoAberto.titulo}</h2>
+          {carregandoMusicas ? (
+            <p className="text-cream-muted text-sm py-4">Carregando...</p>
+          ) : musicasEvento.length === 0 ? (
+            <p className="text-cream-muted text-sm py-4">
+              Ninguém pediu música pra esse evento ainda.
+            </p>
+          ) : (
+            <ul className="divide-y divide-noir-800 max-h-[420px] overflow-y-auto pr-2">
+              {musicasEvento.map((m) => (
+                <li key={m.id} className="py-3 flex items-center gap-3">
+                  <BotaoOuvir url={m.preview_url} />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-cream truncate">{m.nome}</p>
+                    <p className="text-cream-muted text-sm truncate">{m.artista}</p>
+                  </div>
+                  <button
+                    onClick={() => removerMusica(m)}
+                    className="shrink-0 px-3 py-1.5 rounded-lg border border-noir-700 text-xs text-cream-muted hover:text-red-400 hover:border-red-900 transition"
+                  >
+                    Remover
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </div>
   );
 }

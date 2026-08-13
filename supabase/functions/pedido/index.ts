@@ -20,7 +20,14 @@ Deno.serve(async (req) => {
 
   try {
     const body = await req.json();
-    const tipo = ["aprender", "itunes"].includes(body.tipo)
+    const tipo = [
+      "aprender",
+      "itunes",
+      "evento_login",
+      "evento_lista",
+      "evento_add",
+      "evento_remover",
+    ].includes(body.tipo)
       ? body.tipo
       : "pedido";
 
@@ -45,6 +52,85 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
+
+    // Playlist de evento (cliente contratante, protegida por senha única —
+    // a mesma pra todos os eventos). Toda ação confere a senha de novo
+    // aqui no servidor (não há sessão/token: cada chamada manda evento_id
+    // + senha, guardados no navegador do contratante depois do login).
+    if (tipo.startsWith("evento_")) {
+      const eventoId = String(body.evento_id ?? "");
+      const senha = String(body.senha ?? "");
+      if (!eventoId || !senha) return json({ error: "Dados incompletos" }, 400);
+
+      const { data: config, error: configError } = await supabase
+        .from("evento_config")
+        .select("senha")
+        .eq("id", true)
+        .single();
+      if (configError || !config) return json({ error: "Configuração indisponível" }, 500);
+      if (senha !== config.senha) return json({ error: "Senha incorreta" }, 401);
+
+      if (tipo === "evento_login") {
+        return json({ ok: true });
+      }
+
+      if (tipo === "evento_lista") {
+        const { data, error } = await supabase
+          .from("pedidos_evento")
+          .select("id, nome, artista, capa, preview_url, created_at")
+          .eq("evento_id", eventoId)
+          .order("created_at");
+        if (error) return json({ error: "Erro ao carregar" }, 500);
+        return json({ musicas: data ?? [] });
+      }
+
+      if (tipo === "evento_add") {
+        const musica = body.musica ?? {};
+        const nome = String(musica.nome ?? "").slice(0, 200).trim();
+        const artista = String(musica.artista ?? "").slice(0, 200).trim();
+        if (!nome || !artista) return json({ error: "Música inválida" }, 400);
+
+        // Limite generoso pra evitar abuso (ninguém precisa de mais que
+        // isso numa playlist de evento real)
+        const { count } = await supabase
+          .from("pedidos_evento")
+          .select("*", { count: "exact", head: true })
+          .eq("evento_id", eventoId);
+        if ((count ?? 0) >= 60) {
+          return json({ error: "Limite de músicas atingido para este evento" }, 400);
+        }
+
+        const trackId = Number(musica.itunes_track_id);
+        const registro = {
+          evento_id: eventoId,
+          nome,
+          artista,
+          capa: musica.capa ? String(musica.capa).slice(0, 500) : null,
+          itunes_track_id: Number.isFinite(trackId) ? trackId : null,
+          preview_url: musica.preview_url ? String(musica.preview_url).slice(0, 500) : null,
+        };
+
+        const { data, error } = await supabase
+          .from("pedidos_evento")
+          .insert(registro)
+          .select()
+          .single();
+        if (error) return json({ error: "Erro ao adicionar" }, 500);
+        return json({ musica: data });
+      }
+
+      if (tipo === "evento_remover") {
+        const id = String(body.id ?? "");
+        if (!id) return json({ error: "Id inválido" }, 400);
+        const { error } = await supabase
+          .from("pedidos_evento")
+          .delete()
+          .eq("id", id)
+          .eq("evento_id", eventoId);
+        if (error) return json({ error: "Erro ao remover" }, 500);
+        return json({ ok: true });
+      }
+    }
 
     if (tipo === "aprender") {
       // Sugestão de música para o duo aprender

@@ -90,6 +90,7 @@ export async function buscarMusicasApi(termo) {
     vistos.add(chave);
     return [
       {
+        id: r.trackId ?? null,
         nome: r.trackName,
         artista: r.artistName ?? "",
         estilo: r.primaryGenreName ?? "",
