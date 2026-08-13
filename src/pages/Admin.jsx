@@ -194,7 +194,7 @@ const ABAS_OUTROS = [
   ["afinador", "Afinador"],
   ["agenda", "Agenda"],
   ["aprender", "Aprender"],
-  ["evento", "Playlist evento"],
+  ["evento", "Playlist especial"],
   ["gorjeta", "Gorjeta"],
   ["musicas", "Músicas"],
   ["ocultar", "Ocultar"],
@@ -380,9 +380,7 @@ function Icone({ nome, className = "w-5 h-5" }) {
     case "evento":
       return (
         <svg {...props}>
-          <rect x="5" y="11" width="14" height="9" rx="2" />
-          <path d="M8 11V7a4 4 0 018 0v4" />
-          <circle cx="12" cy="15.5" r="1.3" fill="currentColor" stroke="none" />
+          <path d="M12 3l2.9 6.5 7.1.7-5.3 4.7 1.5 6.9-6.2-3.7-6.2 3.7 1.5-6.9L2 10.2l7.1-.7z" />
         </svg>
       );
     default:
