@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { supabase, supabaseConfigured } from "../lib/supabase";
 import {
@@ -2480,9 +2480,14 @@ function GerenciarAgenda() {
 /* ------------------------- PLAYLIST DE EVENTO ------------------------- */
 // Senha compartilhada (mesma pra todos os contratantes) + visão/moderação
 // das músicas que cada evento recebeu na página pública /evento.
+// Chave de comparação nome+artista, ignorando acentos/caixa/pontuação —
+// usada para saber se uma música pedida já é do repertório do duo
+const chaveRepertorio = (nome, artista) => `${normalizarNome(nome)}|${normalizarNome(artista)}`;
+
 function AbaEventoCliente() {
   const [senha, setSenha] = useState("");
   const [senhaSalva, setSenhaSalva] = useState("");
+  const [mostrarSenha, setMostrarSenha] = useState(false);
   const [carregandoSenha, setCarregandoSenha] = useState(true);
   const [statusSenha, setStatusSenha] = useState("");
 
@@ -2492,6 +2497,21 @@ function AbaEventoCliente() {
   const [eventoAbertoId, setEventoAbertoId] = useState(null);
   const [musicasEvento, setMusicasEvento] = useState([]);
   const [carregandoMusicas, setCarregandoMusicas] = useState(false);
+  const [filtroRepertorio, setFiltroRepertorio] = useState("todas"); // todas | com | sem
+
+  const [repertorio, setRepertorio] = useState([]);
+  useEffect(() => {
+    supabase
+      .from("musicas")
+      .select("id, nome, artista")
+      .then(({ data, error }) => {
+        if (!error) setRepertorio(data ?? []);
+      });
+  }, []);
+  const repertorioSet = useMemo(
+    () => new Set(repertorio.map((m) => chaveRepertorio(m.nome, m.artista))),
+    [repertorio]
+  );
 
   useEffect(() => {
     supabase
@@ -2545,6 +2565,7 @@ function AbaEventoCliente() {
 
   const abrirEvento = async (ev) => {
     setEventoAbertoId(ev.id);
+    setFiltroRepertorio("todas");
     setCarregandoMusicas(true);
     const { data, error } = await supabase
       .from("pedidos_evento")
@@ -2582,12 +2603,25 @@ function AbaEventoCliente() {
           <p className="text-cream-muted text-sm">Carregando...</p>
         ) : (
           <form onSubmit={salvarSenha} className="flex gap-2">
-            <input
-              className="input-noir"
-              value={senha}
-              onChange={(e) => setSenha(e.target.value)}
-              placeholder="Senha"
-            />
+            <div className="relative flex-1">
+              <input
+                className="input-noir pr-10 w-full"
+                type={mostrarSenha ? "text" : "password"}
+                value={senha}
+                onChange={(e) => setSenha(e.target.value)}
+                placeholder="Senha"
+                autoComplete="off"
+              />
+              <button
+                type="button"
+                onClick={() => setMostrarSenha((v) => !v)}
+                aria-label={mostrarSenha ? "Ocultar senha" : "Mostrar senha"}
+                title={mostrarSenha ? "Ocultar senha" : "Mostrar senha"}
+                className="absolute right-0 top-0 h-full w-10 flex items-center justify-center text-cream-muted hover:text-gold-300 transition"
+              >
+                <Icone nome="olho" className="w-4 h-4" />
+              </button>
+            </div>
             <button
               type="submit"
               disabled={senha.trim() === senhaSalva || !senha.trim()}
@@ -2639,23 +2673,79 @@ function AbaEventoCliente() {
               Ninguém pediu música pra esse evento ainda.
             </p>
           ) : (
-            <ul className="divide-y divide-noir-800 max-h-[420px] overflow-y-auto pr-2">
-              {musicasEvento.map((m) => (
-                <li key={m.id} className="py-3 flex items-center gap-3">
-                  <BotaoOuvir url={m.preview_url} />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-cream truncate">{m.nome}</p>
-                    <p className="text-cream-muted text-sm truncate">{m.artista}</p>
-                  </div>
+            <>
+              {/* Filtro por já-no-repertório — ajuda a separar o que precisa ensaiar */}
+              <div className="flex gap-2 mb-3">
+                {[
+                  ["todas", `Todas (${musicasEvento.length})`],
+                  [
+                    "com",
+                    `Já no repertório (${
+                      musicasEvento.filter((m) => repertorioSet.has(chaveRepertorio(m.nome, m.artista)))
+                        .length
+                    })`,
+                  ],
+                  [
+                    "sem",
+                    `Fora do repertório (${
+                      musicasEvento.filter((m) => !repertorioSet.has(chaveRepertorio(m.nome, m.artista)))
+                        .length
+                    })`,
+                  ],
+                ].map(([valor, rotulo]) => (
                   <button
-                    onClick={() => removerMusica(m)}
-                    className="shrink-0 px-3 py-1.5 rounded-lg border border-noir-700 text-xs text-cream-muted hover:text-red-400 hover:border-red-900 transition"
+                    key={valor}
+                    onClick={() => setFiltroRepertorio(valor)}
+                    className={`px-3 py-1.5 rounded-full text-xs tracking-wide transition border ${
+                      filtroRepertorio === valor
+                        ? "btn-gold border-transparent"
+                        : "border-noir-700 text-cream-muted hover:text-cream"
+                    }`}
                   >
-                    Remover
+                    {rotulo}
                   </button>
-                </li>
-              ))}
-            </ul>
+                ))}
+              </div>
+
+              <ul className="divide-y divide-noir-800 max-h-[420px] overflow-y-auto pr-2">
+                {musicasEvento
+                  .filter((m) => {
+                    const noRepertorio = repertorioSet.has(chaveRepertorio(m.nome, m.artista));
+                    if (filtroRepertorio === "com") return noRepertorio;
+                    if (filtroRepertorio === "sem") return !noRepertorio;
+                    return true;
+                  })
+                  .map((m) => {
+                    const noRepertorio = repertorioSet.has(chaveRepertorio(m.nome, m.artista));
+                    return (
+                      <li key={m.id} className="py-3 flex items-center gap-3">
+                        <BotaoOuvir url={m.preview_url} />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-cream truncate">
+                            {m.nome}
+                            <span
+                              className={`ml-2 text-[10px] uppercase tracking-wider rounded-full px-2 py-0.5 border ${
+                                noRepertorio
+                                  ? "text-gold-300 border-gold-700"
+                                  : "text-amber-300 border-amber-700"
+                              }`}
+                            >
+                              {noRepertorio ? "no repertório" : "fora do repertório"}
+                            </span>
+                          </p>
+                          <p className="text-cream-muted text-sm truncate">{m.artista}</p>
+                        </div>
+                        <button
+                          onClick={() => removerMusica(m)}
+                          className="shrink-0 px-3 py-1.5 rounded-lg border border-noir-700 text-xs text-cream-muted hover:text-red-400 hover:border-red-900 transition"
+                        >
+                          Remover
+                        </button>
+                      </li>
+                    );
+                  })}
+              </ul>
+            </>
           )}
         </div>
       )}

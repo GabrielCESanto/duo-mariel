@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { supabase, supabaseConfigured } from "../lib/supabase";
-import { buscarMusicasApi } from "../lib/preview";
+import { buscarMusicasApi, buscarPreview } from "../lib/preview";
+import { normalizarNome } from "../lib/texto";
 import {
   loginEvento,
   listarPlaylistEvento,
@@ -10,7 +11,7 @@ import {
 } from "../lib/eventoPlaylist";
 
 const BASE = import.meta.env.BASE_URL;
-const CHAVE_SESSAO = "evento-playlist-auth-v1";
+const CHAVE_SESSAO = "especial-playlist-auth-v1";
 
 const dataHojeIso = () => new Date().toISOString().slice(0, 10);
 
@@ -23,7 +24,11 @@ const dataLocal = (iso) => {
 const formatarData = (iso) =>
   dataLocal(iso).toLocaleDateString("pt-BR", { day: "2-digit", month: "long", year: "numeric" });
 
-export default function Evento() {
+// Chave de comparação nome+artista, ignorando acentos/caixa/pontuação —
+// usada para saber se uma música pedida já é do repertório do duo
+const chaveRepertorio = (nome, artista) => `${normalizarNome(nome)}|${normalizarNome(artista)}`;
+
+export default function Especial() {
   const [auth, setAuth] = useState(() => {
     try {
       return JSON.parse(sessionStorage.getItem(CHAVE_SESSAO));
@@ -59,7 +64,7 @@ export default function Evento() {
               onClick={sair}
               className="text-xs text-cream-muted hover:text-gold-300 transition shrink-0"
             >
-              Trocar evento
+              Sair
             </button>
           )}
         </header>
@@ -71,7 +76,7 @@ export default function Evento() {
         ) : !auth ? (
           <TelaLogin onEntrar={entrar} />
         ) : (
-          <TelaPlaylist auth={auth} />
+          <TelaPlaylist auth={auth} onSair={sair} />
         )}
       </div>
     </div>
@@ -175,25 +180,42 @@ function TelaLogin({ onEntrar }) {
   );
 }
 
-function TelaPlaylist({ auth }) {
+function TelaPlaylist({ auth, onSair }) {
   const [lista, setLista] = useState([]);
+  const [repertorio, setRepertorio] = useState([]);
   const [carregandoLista, setCarregandoLista] = useState(true);
+
   const [busca, setBusca] = useState("");
   const [resultados, setResultados] = useState([]);
   const [buscando, setBuscando] = useState(false);
+  const buscaRef = useRef(0); // descarta respostas de buscas antigas
+
+  const [filtroRepertorio, setFiltroRepertorio] = useState("");
+
   const [adicionandoChave, setAdicionandoChave] = useState(null);
   const [erro, setErro] = useState("");
-  // Descarta respostas de buscas antigas quando a pessoa digita rápido
-  const buscaRef = useRef(0);
 
   const audioRef = useRef(null);
   const [tocandoUrl, setTocandoUrl] = useState(null);
+  const [previewCache, setPreviewCache] = useState({}); // musicaId -> url | null
+  const [carregandoPreviewId, setCarregandoPreviewId] = useState(null);
 
   useEffect(() => {
-    listarPlaylistEvento(auth.eventoId, auth.senha)
-      .then((r) => setLista(r.musicas ?? []))
+    let cancelado = false;
+    Promise.all([
+      listarPlaylistEvento(auth.eventoId, auth.senha),
+      supabase.from("musicas").select("id, nome, artista, estilo").order("nome"),
+    ])
+      .then(([listaRes, repRes]) => {
+        if (cancelado) return;
+        setLista(listaRes.musicas ?? []);
+        if (!repRes.error) setRepertorio(repRes.data ?? []);
+      })
       .catch(() => setErro("Não deu para carregar sua playlist. Recarregue a página."))
-      .finally(() => setCarregandoLista(false));
+      .finally(() => !cancelado && setCarregandoLista(false));
+    return () => {
+      cancelado = true;
+    };
   }, [auth]);
 
   useEffect(() => {
@@ -216,6 +238,19 @@ function TelaPlaylist({ auth }) {
 
   useEffect(() => () => audioRef.current?.pause(), []); // para o áudio ao sair da página
 
+  const repertorioSet = useMemo(
+    () => new Set(repertorio.map((m) => chaveRepertorio(m.nome, m.artista))),
+    [repertorio]
+  );
+
+  const repertorioFiltrado = useMemo(() => {
+    const q = normalizarNome(filtroRepertorio);
+    if (!q) return repertorio;
+    return repertorio.filter((m) =>
+      normalizarNome(`${m.nome} ${m.artista} ${m.estilo ?? ""}`).includes(q)
+    );
+  }, [repertorio, filtroRepertorio]);
+
   const tocar = (url) => {
     if (!url) return;
     if (tocandoUrl === url) {
@@ -231,6 +266,22 @@ function TelaPlaylist({ auth }) {
     audioRef.current.src = url;
     audioRef.current.play().catch(() => setTocandoUrl(null));
     setTocandoUrl(url);
+  };
+
+  // Preview do repertório não vem pronto (diferente da busca no iTunes) —
+  // busca só quando a pessoa toca no botão, e guarda em cache pra não
+  // buscar de novo se ela clicar mais de uma vez
+  const tocarRepertorio = async (m) => {
+    const cacheado = previewCache[m.id];
+    if (cacheado !== undefined) {
+      if (cacheado) tocar(cacheado);
+      return;
+    }
+    setCarregandoPreviewId(m.id);
+    const url = await buscarPreview(m.nome, m.artista);
+    setPreviewCache((c) => ({ ...c, [m.id]: url }));
+    setCarregandoPreviewId(null);
+    if (url) tocar(url);
   };
 
   const jaEsta = (item) =>
@@ -265,6 +316,15 @@ function TelaPlaylist({ auth }) {
     }
   };
 
+  const adicionarDoRepertorio = (m) =>
+    adicionar({
+      nome: m.nome,
+      artista: m.artista,
+      capa: null,
+      previewUrl: previewCache[m.id] ?? null,
+      id: null,
+    });
+
   const remover = async (item) => {
     try {
       await removerMusicaEvento(auth.eventoId, auth.senha, item.id);
@@ -276,7 +336,7 @@ function TelaPlaylist({ auth }) {
 
   return (
     <div className="space-y-6">
-      {/* Busca (iTunes) */}
+      {/* Busca (iTunes) — qualquer música, mesmo fora do repertório do duo */}
       <div className="border border-noir-700 rounded-2xl p-6 bg-noir-900/50">
         <h1 className="section-title text-lg mb-1">{auth.titulo || "Seu evento"}</h1>
         <p className="text-sm text-cream-muted mb-4">
@@ -339,9 +399,72 @@ function TelaPlaylist({ auth }) {
         )}
       </div>
 
+      {/* Repertório do duo — músicas que eles já tocam, sem precisar buscar */}
+      <div className="border border-noir-700 rounded-2xl p-6 bg-noir-900/50">
+        <h2 className="section-title text-sm mb-1">Repertório do Duo Mariel</h2>
+        <p className="text-xs text-cream-muted mb-3">
+          Já tocamos essas — é só escolher e adicionar direto.
+        </p>
+
+        <input
+          className="input-noir"
+          placeholder="Filtrar o repertório..."
+          value={filtroRepertorio}
+          onChange={(e) => setFiltroRepertorio(e.target.value)}
+        />
+
+        {carregandoLista ? (
+          <p className="text-cream-muted text-sm py-4">Carregando...</p>
+        ) : (
+          <ul className="mt-3 divide-y divide-noir-800 max-h-[320px] overflow-y-auto pr-2">
+            {repertorioFiltrado.map((m) => {
+              const chave = `${m.nome}|${m.artista}`;
+              const adicionada = jaEsta({ nome: m.nome, artista: m.artista, id: null });
+              const preview = previewCache[m.id];
+              return (
+                <li key={m.id} className="flex items-center gap-3 py-2.5">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm text-cream truncate">{m.nome}</p>
+                    <p className="text-xs text-cream-muted truncate">
+                      {m.artista}
+                      {m.estilo ? ` • ${m.estilo}` : ""}
+                    </p>
+                  </div>
+                  {preview !== null && (
+                    <button
+                      onClick={() => tocarRepertorio(m)}
+                      disabled={carregandoPreviewId === m.id}
+                      aria-label="Ouvir trecho"
+                      title="Ouvir um trecho de 30s"
+                      className="shrink-0 w-8 h-8 rounded-full border border-gold-600 text-gold-300 text-xs hover:bg-noir-800 transition disabled:opacity-40"
+                    >
+                      {carregandoPreviewId === m.id
+                        ? "⏳"
+                        : preview && tocandoUrl === preview
+                          ? "❚❚"
+                          : "▶"}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => adicionarDoRepertorio(m)}
+                    disabled={adicionada || adicionandoChave === chave}
+                    className="shrink-0 btn-gold px-3 py-1.5 rounded-lg text-xs disabled:opacity-50"
+                  >
+                    {adicionada ? "Adicionada ✓" : adicionandoChave === chave ? "..." : "+ Adicionar"}
+                  </button>
+                </li>
+              );
+            })}
+            {repertorioFiltrado.length === 0 && (
+              <li className="py-4 text-cream-muted text-sm">Nada encontrado no repertório.</li>
+            )}
+          </ul>
+        )}
+      </div>
+
       {erro && <p className="text-red-400 text-sm">{erro}</p>}
 
-      {/* Playlist do evento (com opção de remover) */}
+      {/* Playlist do evento — com indicativo de repertório e opção de remover */}
       <div className="border border-noir-700 rounded-2xl p-6 bg-noir-900/50">
         <h2 className="section-title text-sm mb-4">
           Sua lista {carregandoLista ? "" : `(${lista.length})`}
@@ -354,34 +477,53 @@ function TelaPlaylist({ auth }) {
           </p>
         ) : (
           <ul className="divide-y divide-noir-800 max-h-[420px] overflow-y-auto pr-2">
-            {lista.map((m) => (
-              <li key={m.id} className="flex items-center gap-3 py-3">
-                {m.capa ? (
-                  <img
-                    src={m.capa}
-                    alt=""
-                    className="w-10 h-10 rounded-lg border border-noir-700 shrink-0"
-                  />
-                ) : (
-                  <span className="w-10 h-10 rounded-lg border border-noir-700 shrink-0 flex items-center justify-center text-cream-muted">
-                    ♪
-                  </span>
-                )}
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm text-cream truncate">{m.nome}</p>
-                  <p className="text-xs text-cream-muted truncate">{m.artista}</p>
-                </div>
-                <button
-                  onClick={() => remover(m)}
-                  className="shrink-0 px-3 py-1.5 rounded-lg border border-noir-700 text-xs text-cream-muted hover:text-red-400 hover:border-red-900 transition"
-                >
-                  Remover
-                </button>
-              </li>
-            ))}
+            {lista.map((m) => {
+              const noRepertorio = repertorioSet.has(chaveRepertorio(m.nome, m.artista));
+              return (
+                <li key={m.id} className="flex items-center gap-3 py-3">
+                  {m.capa ? (
+                    <img
+                      src={m.capa}
+                      alt=""
+                      className="w-10 h-10 rounded-lg border border-noir-700 shrink-0"
+                    />
+                  ) : (
+                    <span className="w-10 h-10 rounded-lg border border-noir-700 shrink-0 flex items-center justify-center text-cream-muted">
+                      ♪
+                    </span>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm text-cream truncate">{m.nome}</p>
+                    <p className="text-xs text-cream-muted truncate">{m.artista}</p>
+                    <span
+                      className={`inline-block mt-1 text-[10px] uppercase tracking-wider rounded-full px-2 py-0.5 border ${
+                        noRepertorio
+                          ? "text-gold-300 border-gold-700"
+                          : "text-cream-muted border-noir-700"
+                      }`}
+                    >
+                      {noRepertorio ? "Já tocamos" : "Novidade pra gente"}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => remover(m)}
+                    className="shrink-0 px-3 py-1.5 rounded-lg border border-noir-700 text-xs text-cream-muted hover:text-red-400 hover:border-red-900 transition"
+                  >
+                    Remover
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>
+
+      <button
+        onClick={onSair}
+        className="w-full py-3 rounded-xl border border-noir-700 text-sm text-cream-muted hover:text-cream hover:border-noir-600 transition"
+      >
+        Sair
+      </button>
     </div>
   );
 }

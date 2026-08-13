@@ -270,7 +270,7 @@ export default function Home() {
             Monte a playlist do seu evento — escolha as músicas que quer ouvir no seu show.
           </p>
           <Link
-            to="/evento"
+            to="/especial"
             className="btn-gold px-6 py-3 rounded-xl text-sm inline-flex items-center gap-2"
           >
             🎵 Montar playlist do meu evento

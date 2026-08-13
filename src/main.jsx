@@ -4,7 +4,7 @@ import { HashRouter, Routes, Route } from "react-router-dom";
 import "./index.css";
 import Home from "./pages/Home.jsx";
 import Admin from "./pages/Admin.jsx";
-import Evento from "./pages/Evento.jsx";
+import Especial from "./pages/Especial.jsx";
 import ErrorBoundary from "./components/ErrorBoundary.jsx";
 import { iniciarAnalytics } from "./lib/analytics.js";
 
@@ -34,7 +34,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/admin" element={<Admin />} />
-          <Route path="/evento" element={<Evento />} />
+          <Route path="/especial" element={<Especial />} />
           <Route
             path="/cifra/:id"
             element={
