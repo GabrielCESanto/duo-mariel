@@ -15,7 +15,11 @@ const ZOOM_ALVO = 2.0; // cobre bem até 200% de zoom com nitidez
 // ter que renderizar o PDF na hora (era o que deixava a abertura lenta e,
 // em celulares mais fracos, arriscada).
 export async function pdfParaImagensJpeg(origem, onProgresso) {
-  const doc = await pdfjs.getDocument(origem).promise;
+  // getDocument não aceita um File/Blob bruto (essa versão do pdf.js exige
+  // data/range/url) — sem isso, todo fallback pra imagens falhava direto
+  // aqui também, do mesmo jeito que pdfParaChordPro
+  const data = origem instanceof Blob ? new Uint8Array(await origem.arrayBuffer()) : origem;
+  const doc = await pdfjs.getDocument({ data }).promise;
   try {
     const paginas = [];
     for (let i = 1; i <= doc.numPages; i++) {

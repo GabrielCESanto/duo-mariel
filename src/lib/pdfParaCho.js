@@ -215,7 +215,11 @@ function processarPaginas(paginas) {
 // automaticamente (fonte quebrada, PDF escaneado, ou nenhum acorde
 // reconhecido — nesses casos a música continua só com o PDF)
 export async function pdfParaChordPro(origem) {
-  const doc = await pdfjs.getDocument(origem).promise;
+  // getDocument não aceita um File/Blob bruto (essa versão do pdf.js exige
+  // data/range/url) — sem isso, TODO upload falhava direto aqui, mesmo com
+  // o worker certo e um PDF perfeito
+  const data = origem instanceof Blob ? new Uint8Array(await origem.arrayBuffer()) : origem;
+  const doc = await pdfjs.getDocument({ data }).promise;
   try {
     const paginas = [];
     for (let i = 1; i <= doc.numPages; i++) {
