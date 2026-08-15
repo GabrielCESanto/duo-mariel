@@ -2683,15 +2683,19 @@ function AbaEventoCliente() {
     setCarregandoMusicas(false);
   };
 
+  // Cada ação retorna true/false (não lança) — o modal usa isso pra
+  // mostrar um erro visível em vez de falhar em silêncio (foi assim que o
+  // link ficou "sem fazer nada" quando a policy de UPDATE estava faltando)
   const removerMusica = async (m) => {
-    if (!window.confirm(`Remover "${m.nome} — ${m.artista}" da playlist?`)) return;
+    if (!window.confirm(`Remover "${m.nome} — ${m.artista}" da playlist?`)) return true;
     const { error } = await supabase.from("pedidos_evento").delete().eq("id", m.id);
     if (error) {
       console.error(error);
-      return;
+      return false;
     }
     setMusicasEvento((lista) => lista.filter((x) => x.id !== m.id));
     setContagens((c) => ({ ...c, [eventoAbertoId]: Math.max(0, (c[eventoAbertoId] ?? 1) - 1) }));
+    return true;
   };
 
   // Grava o vínculo manual (pedidos_evento.musica_id) — usado tanto depois
@@ -2703,13 +2707,14 @@ function AbaEventoCliente() {
       .eq("id", m.id);
     if (error) {
       console.error(error);
-      return;
+      return false;
     }
     setRepertorio((rep) => (rep.some((r) => r.id === musica.id) ? rep : [...rep, musica]));
     setMusicasEvento((lista) =>
       lista.map((x) => (x.id === m.id ? { ...x, musica_id: musica.id } : x))
     );
     setModalMusicaId(null);
+    return true;
   };
 
   const adicionarAoRepertorio = async (m) => {
@@ -2726,8 +2731,8 @@ function AbaEventoCliente() {
       .select("id, nome, artista")
       .single()
     ).data;
-    if (!musica) return;
-    await linkarMusica(m, musica);
+    if (!musica) return false;
+    return await linkarMusica(m, musica);
   };
 
   const eventoAberto = eventos.find((e) => e.id === eventoAbertoId) ?? null;
@@ -2928,6 +2933,7 @@ function ModalAcaoMusicaEvento({ musica, resolvedId, repertorio, navigate, onFec
   const [etapa, setEtapa] = useState("menu"); // menu | linkar
   const [buscaLink, setBuscaLink] = useState("");
   const [processando, setProcessando] = useState(false);
+  const [erro, setErro] = useState("");
 
   const candidatos = useMemo(() => {
     const q = normalizarNome(buscaLink);
@@ -2939,8 +2945,10 @@ function ModalAcaoMusicaEvento({ musica, resolvedId, repertorio, navigate, onFec
 
   const executar = async (fn) => {
     setProcessando(true);
-    await fn();
+    setErro("");
+    const ok = await fn();
     setProcessando(false);
+    if (ok === false) setErro("Não deu certo. Tente de novo.");
   };
 
   return (
@@ -2965,6 +2973,8 @@ function ModalAcaoMusicaEvento({ musica, resolvedId, repertorio, navigate, onFec
             ×
           </button>
         </div>
+
+        {erro && <p className="text-red-400 text-xs mb-3">{erro}</p>}
 
         {etapa === "menu" ? (
           <div className="space-y-2">
