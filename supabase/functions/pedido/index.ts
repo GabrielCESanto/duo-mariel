@@ -27,6 +27,7 @@ Deno.serve(async (req) => {
       "evento_lista",
       "evento_add",
       "evento_remover",
+      "evento_add_repertorio",
     ].includes(body.tipo)
       ? body.tipo
       : "pedido";
@@ -132,6 +133,33 @@ Deno.serve(async (req) => {
           .eq("evento_id", eventoId);
         if (error) return json({ error: "Erro ao remover" }, 500);
         return json({ ok: true });
+      }
+
+      // Leva uma música da lista pessoal do evento pro repertório oficial
+      // do duo (tabela "musicas") — útil quando o contratante pede algo
+      // que a gente ainda não toca. Evita duplicata (nome+artista, sem
+      // diferenciar caixa) em vez de inserir de novo se já existir.
+      if (tipo === "evento_add_repertorio") {
+        const musica = body.musica ?? {};
+        const nome = String(musica.nome ?? "").slice(0, 200).trim();
+        const artista = String(musica.artista ?? "").slice(0, 200).trim();
+        if (!nome || !artista) return json({ error: "Música inválida" }, 400);
+
+        const { data: existente } = await supabase
+          .from("musicas")
+          .select("id, nome, artista, estilo")
+          .ilike("nome", nome)
+          .ilike("artista", artista)
+          .maybeSingle();
+        if (existente) return json({ musica: existente });
+
+        const { data, error } = await supabase
+          .from("musicas")
+          .insert({ nome, artista })
+          .select("id, nome, artista, estilo")
+          .single();
+        if (error) return json({ error: "Erro ao adicionar ao repertório" }, 500);
+        return json({ musica: data });
       }
     }
 
