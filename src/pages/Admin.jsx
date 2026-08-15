@@ -2590,6 +2590,29 @@ function AbaEventoCliente() {
     setContagens((c) => ({ ...c, [eventoAbertoId]: Math.max(0, (c[eventoAbertoId] ?? 1) - 1) }));
   };
 
+  const [adicionandoRepertorioId, setAdicionandoRepertorioId] = useState(null);
+
+  const adicionarAoRepertorio = async (m) => {
+    setAdicionandoRepertorioId(m.id);
+    const { data: existente } = await supabase
+      .from("musicas")
+      .select("id, nome, artista")
+      .ilike("nome", m.nome)
+      .ilike("artista", m.artista)
+      .maybeSingle();
+
+    const musica = existente ?? (await supabase
+      .from("musicas")
+      .insert({ nome: m.nome, artista: m.artista })
+      .select("id, nome, artista")
+      .single()
+    ).data;
+
+    setAdicionandoRepertorioId(null);
+    if (!musica) return;
+    setRepertorio((rep) => (rep.some((r) => r.id === musica.id) ? rep : [...rep, musica]));
+  };
+
   const eventoAberto = eventos.find((e) => e.id === eventoAbertoId) ?? null;
 
   return (
@@ -2755,6 +2778,16 @@ function AbaEventoCliente() {
                           </p>
                           <p className="text-cream-muted text-sm truncate">{m.artista}</p>
                         </div>
+                        {!noRepertorio && (
+                          <button
+                            onClick={() => adicionarAoRepertorio(m)}
+                            disabled={adicionandoRepertorioId === m.id}
+                            title="Adicionar essa música ao repertório do Duo Mariel"
+                            className="shrink-0 px-3 py-1.5 rounded-lg border border-gold-700 text-xs text-gold-300 hover:bg-noir-800 transition disabled:opacity-50"
+                          >
+                            {adicionandoRepertorioId === m.id ? "..." : "+ Repertório"}
+                          </button>
+                        )}
                         <button
                           onClick={() => removerMusica(m)}
                           className="shrink-0 px-3 py-1.5 rounded-lg border border-noir-700 text-xs text-cream-muted hover:text-red-400 hover:border-red-900 transition"

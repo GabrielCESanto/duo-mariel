@@ -8,7 +8,6 @@ import {
   listarPlaylistEvento,
   adicionarMusicaEvento,
   removerMusicaEvento,
-  adicionarAoRepertorioEvento,
 } from "../lib/eventoPlaylist";
 
 const BASE = import.meta.env.BASE_URL;
@@ -194,7 +193,6 @@ function TelaPlaylist({ auth, onSair }) {
   const [filtroRepertorio, setFiltroRepertorio] = useState("");
 
   const [adicionandoChave, setAdicionandoChave] = useState(null);
-  const [adicionandoRepertorioId, setAdicionandoRepertorioId] = useState(null);
   const [erro, setErro] = useState("");
 
   const audioRef = useRef(null);
@@ -333,25 +331,6 @@ function TelaPlaylist({ auth, onSair }) {
       setLista((l) => l.filter((m) => m.id !== item.id));
     } catch {
       setErro("Não deu para remover. Tente de novo.");
-    }
-  };
-
-  const adicionarAoRepertorio = async (item) => {
-    if (adicionandoRepertorioId) return;
-    setAdicionandoRepertorioId(item.id);
-    setErro("");
-    try {
-      const r = await adicionarAoRepertorioEvento(auth.eventoId, auth.senha, {
-        nome: item.nome,
-        artista: item.artista,
-      });
-      setRepertorio((rep) =>
-        rep.some((m) => m.id === r.musica.id) ? rep : [...rep, r.musica]
-      );
-    } catch {
-      setErro("Não deu para adicionar ao repertório. Tente de novo.");
-    } finally {
-      setAdicionandoRepertorioId(null);
     }
   };
 
@@ -526,24 +505,12 @@ function TelaPlaylist({ auth, onSair }) {
                       {noRepertorio ? "Já tocamos" : "Novidade pra gente"}
                     </span>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    {!noRepertorio && (
-                      <button
-                        onClick={() => adicionarAoRepertorio(m)}
-                        disabled={adicionandoRepertorioId === m.id}
-                        title="Adicionar essa música ao repertório do Duo Mariel"
-                        className="px-3 py-1.5 rounded-lg border border-gold-700 text-xs text-gold-300 hover:bg-noir-800 transition disabled:opacity-50"
-                      >
-                        {adicionandoRepertorioId === m.id ? "..." : "+ Repertório"}
-                      </button>
-                    )}
-                    <button
-                      onClick={() => remover(m)}
-                      className="px-3 py-1.5 rounded-lg border border-noir-700 text-xs text-cream-muted hover:text-red-400 hover:border-red-900 transition"
-                    >
-                      Remover
-                    </button>
-                  </div>
+                  <button
+                    onClick={() => remover(m)}
+                    className="shrink-0 px-3 py-1.5 rounded-lg border border-noir-700 text-xs text-cream-muted hover:text-red-400 hover:border-red-900 transition"
+                  >
+                    Remover
+                  </button>
                 </li>
               );
             })}

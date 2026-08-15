@@ -32,6 +32,3 @@ export const adicionarMusicaEvento = (evento_id, senha, musica) =>
 
 export const removerMusicaEvento = (evento_id, senha, id) =>
   chamar("evento_remover", { evento_id, senha, id });
-
-export const adicionarAoRepertorioEvento = (evento_id, senha, musica) =>
-  chamar("evento_add_repertorio", { evento_id, senha, musica });
