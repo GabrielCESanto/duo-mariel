@@ -57,6 +57,11 @@ create table if not exists public.pedidos (
   created_at timestamptz not null default now()
 );
 
+-- Pedido "ignorado" (decidiu não atender) vai pro Arquivo sem ser excluído
+-- — diferente de "atendido" (foi tocado). Dá pra revisar depois quais
+-- pedidos chegaram e o que foi feito com cada um.
+alter table public.pedidos add column if not exists ignorado boolean not null default false;
+
 alter table public.pedidos enable row level security;
 
 -- Visitantes NÃO acessam a tabela diretamente:
@@ -140,10 +145,19 @@ create table if not exists public.eventos (
 alter table public.eventos add column if not exists cache text;
 alter table public.eventos add column if not exists duracao text;
 
+-- Senha da playlist pública desse evento (ver seção "PLAYLIST DE EVENTO"
+-- mais abaixo) — cada show tem a sua própria, em vez de uma senha única
+-- compartilhada entre todos. Null/vazia = playlist desativada pra esse
+-- evento. Assim como cache/duracao, é privada: nunca exposta ao anon (nem
+-- pela policy de leitura pública, nem pelo grant de colunas logo abaixo) —
+-- só a Edge Function (service role) lê pra conferir o login do contratante.
+alter table public.eventos add column if not exists senha text;
+
 alter table public.eventos enable row level security;
 
 -- Qualquer visitante pode LER a agenda, mas SEM as colunas privadas
--- (cache e duracao ficam visíveis apenas para usuários logados)
+-- (cache, duracao e senha ficam visíveis apenas para usuários logados /
+-- a Edge Function com service role)
 drop policy if exists "eventos: leitura publica" on public.eventos;
 create policy "eventos: leitura publica"
   on public.eventos for select
@@ -488,10 +502,10 @@ create policy "pedidos_evento: delete autenticado"
   to authenticated
   using (true);
 
--- Senha única, compartilhada entre todos os eventos (mesma senha pra cada
--- contratante — não precisa ser uma por evento). Troque quando quiser em
--- Menu > Playlist evento, na área do músico. O anon nunca acessa esta
--- tabela: só a Edge Function (service role) lê pra conferir o login.
+-- OBSOLETA: senha única que era compartilhada entre todos os eventos.
+-- Substituída pela coluna eventos.senha (uma por show) — o app não lê nem
+-- escreve mais nesta tabela; mantida só pra não perder o histórico sem
+-- precisar de um DROP TABLE.
 create table if not exists public.evento_config (
   id boolean primary key default true,
   senha text not null default 'trocaressa',

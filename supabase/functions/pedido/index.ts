@@ -53,22 +53,25 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    // Playlist de evento (cliente contratante, protegida por senha única —
-    // a mesma pra todos os eventos). Toda ação confere a senha de novo
-    // aqui no servidor (não há sessão/token: cada chamada manda evento_id
-    // + senha, guardados no navegador do contratante depois do login).
+    // Playlist de evento (cliente contratante, protegida por senha própria
+    // de cada show). Toda ação confere a senha de novo aqui no servidor
+    // (não há sessão/token: cada chamada manda evento_id + senha, guardados
+    // no navegador do contratante depois do login).
     if (tipo.startsWith("evento_")) {
       const eventoId = String(body.evento_id ?? "");
       const senha = String(body.senha ?? "");
       if (!eventoId || !senha) return json({ error: "Dados incompletos" }, 400);
 
-      const { data: config, error: configError } = await supabase
-        .from("evento_config")
+      const { data: evento, error: eventoError } = await supabase
+        .from("eventos")
         .select("senha")
-        .eq("id", true)
+        .eq("id", eventoId)
         .single();
-      if (configError || !config) return json({ error: "Configuração indisponível" }, 500);
-      if (senha !== config.senha) return json({ error: "Senha incorreta" }, 401);
+      if (eventoError || !evento) return json({ error: "Evento não encontrado" }, 404);
+      // Sem senha configurada pra esse evento = recurso desativado (mesma
+      // mensagem de "senha incorreta" pra não revelar se o evento existe
+      // com a playlist desligada)
+      if (!evento.senha || senha !== evento.senha) return json({ error: "Senha incorreta" }, 401);
 
       if (tipo === "evento_login") {
         return json({ ok: true });

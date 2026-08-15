@@ -2483,12 +2483,6 @@ function GerenciarAgenda() {
 const chaveRepertorio = (nome, artista) => `${normalizarNome(nome)}|${normalizarNome(artista)}`;
 
 function AbaEventoCliente() {
-  const [senha, setSenha] = useState("");
-  const [senhaSalva, setSenhaSalva] = useState("");
-  const [mostrarSenha, setMostrarSenha] = useState(false);
-  const [carregandoSenha, setCarregandoSenha] = useState(true);
-  const [statusSenha, setStatusSenha] = useState("");
-
   const [eventos, setEventos] = useState([]);
   const [contagens, setContagens] = useState({}); // evento_id -> quantidade de músicas
   const [carregandoEventos, setCarregandoEventos] = useState(true);
@@ -2496,6 +2490,12 @@ function AbaEventoCliente() {
   const [musicasEvento, setMusicasEvento] = useState([]);
   const [carregandoMusicas, setCarregandoMusicas] = useState(false);
   const [filtroRepertorio, setFiltroRepertorio] = useState("todas"); // todas | com | sem
+
+  // Senha do evento aberto (cada show tem a sua — vazio = playlist
+  // desativada pra esse evento)
+  const [senhaEvento, setSenhaEvento] = useState("");
+  const [mostrarSenha, setMostrarSenha] = useState(false);
+  const [statusSenha, setStatusSenha] = useState("");
 
   const [repertorio, setRepertorio] = useState([]);
   useEffect(() => {
@@ -2511,25 +2511,13 @@ function AbaEventoCliente() {
     [repertorio]
   );
 
-  useEffect(() => {
-    supabase
-      .from("evento_config")
-      .select("senha")
-      .eq("id", true)
-      .maybeSingle()
-      .then(({ data, error }) => {
-        if (!error && data) {
-          setSenha(data.senha);
-          setSenhaSalva(data.senha);
-        }
-        setCarregandoSenha(false);
-      });
-  }, []);
-
   const carregarEventos = async () => {
     setCarregandoEventos(true);
     const [{ data: evs, error: e1 }, { data: pedidos, error: e2 }] = await Promise.all([
-      supabase.from("eventos").select("id, titulo, data, local").order("data", { ascending: false }),
+      supabase
+        .from("eventos")
+        .select("id, titulo, data, local, senha")
+        .order("data", { ascending: false }),
       supabase.from("pedidos_evento").select("evento_id"),
     ]);
     if (!e1) setEventos(evs ?? []);
@@ -2545,24 +2533,40 @@ function AbaEventoCliente() {
     carregarEventos();
   }, []);
 
-  const salvarSenha = async (e) => {
+  // Sem caracteres ambíguos (0/O, 1/I/L) — mais fácil de ditar por telefone
+  const gerarSenha = () => {
+    const alfabeto = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    let s = "";
+    for (let i = 0; i < 6; i++) s += alfabeto[Math.floor(Math.random() * alfabeto.length)];
+    setSenhaEvento(s);
+  };
+
+  const salvarSenhaEvento = async (e) => {
     e.preventDefault();
-    const nova = senha.trim();
-    if (!nova) return;
+    if (!eventoAbertoId) return;
+    const nova = senhaEvento.trim() || null; // vazio = desativa a playlist desse evento
     setStatusSenha("⏳ Salvando...");
-    const { error } = await supabase.from("evento_config").update({ senha: nova }).eq("id", true);
+    const { error } = await supabase
+      .from("eventos")
+      .update({ senha: nova })
+      .eq("id", eventoAbertoId);
     if (error) {
       console.error(error);
       setStatusSenha("❌ Erro ao salvar.");
       return;
     }
-    setSenhaSalva(nova);
-    setStatusSenha("✅ Senha atualizada!");
+    setEventos((lista) =>
+      lista.map((ev) => (ev.id === eventoAbertoId ? { ...ev, senha: nova } : ev))
+    );
+    setStatusSenha(nova ? "✅ Senha atualizada!" : "✅ Playlist desativada pra esse evento.");
     setTimeout(() => setStatusSenha(""), 2500);
   };
 
   const abrirEvento = async (ev) => {
     setEventoAbertoId(ev.id);
+    setSenhaEvento(ev.senha ?? "");
+    setMostrarSenha(false);
+    setStatusSenha("");
     setFiltroRepertorio("todas");
     setCarregandoMusicas(true);
     const { data, error } = await supabase
@@ -2589,52 +2593,13 @@ function AbaEventoCliente() {
 
   return (
     <div className="space-y-6">
-      {/* Senha compartilhada */}
-      <div className="border border-noir-700 rounded-2xl p-5 bg-noir-900/50 max-w-xl">
-        <h2 className="section-title text-sm mb-1">Playlist de evento</h2>
-        <p className="text-xs text-cream-muted mb-4">
-          Senha única que você passa pra quem contratou o show — com ela, a
-          pessoa escolhe o evento dela na página pública (botão acima da
-          Agenda) e monta a playlist de músicas que quer ouvir.
-        </p>
-        {carregandoSenha ? (
-          <p className="text-cream-muted text-sm">Carregando...</p>
-        ) : (
-          <form onSubmit={salvarSenha} className="flex gap-2">
-            <div className="relative flex-1">
-              <input
-                className="input-noir pr-10 w-full"
-                type={mostrarSenha ? "text" : "password"}
-                value={senha}
-                onChange={(e) => setSenha(e.target.value)}
-                placeholder="Senha"
-                autoComplete="off"
-              />
-              <button
-                type="button"
-                onClick={() => setMostrarSenha((v) => !v)}
-                aria-label={mostrarSenha ? "Ocultar senha" : "Mostrar senha"}
-                title={mostrarSenha ? "Ocultar senha" : "Mostrar senha"}
-                className="absolute right-0 top-0 h-full w-10 flex items-center justify-center text-cream-muted hover:text-gold-300 transition"
-              >
-                <Icone nome="olho" className="w-4 h-4" />
-              </button>
-            </div>
-            <button
-              type="submit"
-              disabled={senha.trim() === senhaSalva || !senha.trim()}
-              className="btn-gold px-5 py-2.5 rounded-xl text-sm shrink-0 disabled:opacity-50"
-            >
-              Salvar
-            </button>
-          </form>
-        )}
-        {statusSenha && <p className="text-sm text-cream-muted mt-2">{statusSenha}</p>}
-      </div>
-
       {/* Eventos e suas playlists */}
       <div className="border border-noir-700 rounded-2xl p-5 bg-noir-900/50">
-        <h2 className="section-title text-sm mb-4">Playlists por evento</h2>
+        <h2 className="section-title text-sm mb-1">Playlists por evento</h2>
+        <p className="text-xs text-cream-muted mb-4">
+          Cada show tem sua própria senha — abra o evento abaixo pra ver ou
+          trocar a senha que você passa pra quem contratou.
+        </p>
         {carregandoEventos ? (
           <p className="text-cream-muted text-sm py-4">Carregando...</p>
         ) : eventos.length === 0 ? (
@@ -2649,7 +2614,18 @@ function AbaEventoCliente() {
                     eventoAbertoId === ev.id ? "text-gold-300" : "text-cream hover:text-gold-300"
                   } transition`}
                 >
-                  <p className="truncate">{ev.titulo}</p>
+                  <p className="truncate flex items-center gap-2">
+                    {ev.titulo}
+                    <span
+                      className={`shrink-0 text-[10px] uppercase tracking-wider rounded-full px-2 py-0.5 border ${
+                        ev.senha
+                          ? "text-gold-300 border-gold-700"
+                          : "text-cream-muted border-noir-600"
+                      }`}
+                    >
+                      {ev.senha ? "🔓 com senha" : "🔒 sem senha"}
+                    </span>
+                  </p>
                   <p className="text-cream-muted text-xs mt-0.5">
                     {formatarDataCurta(ev.data)}
                     {ev.local ? ` • ${ev.local}` : ""} • {contagens[ev.id] ?? 0} música(s) pedida(s)
@@ -2664,6 +2640,51 @@ function AbaEventoCliente() {
       {eventoAberto && (
         <div className="border border-noir-700 rounded-2xl p-5 bg-noir-900/50">
           <h2 className="section-title text-sm mb-4">Playlist — {eventoAberto.titulo}</h2>
+
+          {/* Senha desse evento — vazia desativa a playlist pública pra ele */}
+          <div className="mb-5 pb-5 border-b border-noir-800">
+            <p className="text-xs text-cream-muted mb-2">
+              Senha que você passa pra quem contratou esse show. Deixe em
+              branco e salve pra desativar a playlist pública dele.
+            </p>
+            <form onSubmit={salvarSenhaEvento} className="flex gap-2 flex-wrap">
+              <div className="relative flex-1 min-w-[160px]">
+                <input
+                  className="input-noir pr-10 w-full"
+                  type={mostrarSenha ? "text" : "password"}
+                  value={senhaEvento}
+                  onChange={(e) => setSenhaEvento(e.target.value)}
+                  placeholder="Sem senha (desativado)"
+                  autoComplete="off"
+                />
+                <button
+                  type="button"
+                  onClick={() => setMostrarSenha((v) => !v)}
+                  aria-label={mostrarSenha ? "Ocultar senha" : "Mostrar senha"}
+                  title={mostrarSenha ? "Ocultar senha" : "Mostrar senha"}
+                  className="absolute right-0 top-0 h-full w-10 flex items-center justify-center text-cream-muted hover:text-gold-300 transition"
+                >
+                  <Icone nome="olho" className="w-4 h-4" />
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={gerarSenha}
+                className="px-4 py-2.5 rounded-xl border border-noir-700 text-sm text-cream-muted hover:text-gold-300 hover:border-gold-600 transition shrink-0"
+              >
+                Gerar
+              </button>
+              <button
+                type="submit"
+                disabled={senhaEvento.trim() === (eventoAberto.senha ?? "")}
+                className="btn-gold px-5 py-2.5 rounded-xl text-sm shrink-0 disabled:opacity-50"
+              >
+                Salvar
+              </button>
+            </form>
+            {statusSenha && <p className="text-sm text-cream-muted mt-2">{statusSenha}</p>}
+          </div>
+
           {carregandoMusicas ? (
             <p className="text-cream-muted text-sm py-4">Carregando...</p>
           ) : musicasEvento.length === 0 ? (
@@ -3988,20 +4009,29 @@ function GerenciarPedidos({ onMudanca, cifraPorNome }) {
   const [filtroAte, setFiltroAte] = useState("");
   const navigate = useNavigate();
 
+  // Arquivados junta duas origens: atendidos antigos (mais de 15 dias) e
+  // qualquer ignorado (vai pro arquivo na hora, não espera prazo nenhum)
+  const filtroArquivados = (query, corte) =>
+    query.or(`ignorado.eq.true,and(atendido.eq.true,created_at.lt.${corte})`);
+
   const atualizarContagens = async () => {
     const corte = dataCorteArquivo();
     const [{ count: pendentes }, { count: atendidos }, { count: arquivados }] = await Promise.all([
-      supabase.from("pedidos").select("*", { count: "exact", head: true }).eq("atendido", false),
+      supabase
+        .from("pedidos")
+        .select("*", { count: "exact", head: true })
+        .eq("atendido", false)
+        .eq("ignorado", false),
       supabase
         .from("pedidos")
         .select("*", { count: "exact", head: true })
         .eq("atendido", true)
+        .eq("ignorado", false)
         .gte("created_at", corte),
-      supabase
-        .from("pedidos")
-        .select("*", { count: "exact", head: true })
-        .eq("atendido", true)
-        .lt("created_at", corte),
+      filtroArquivados(
+        supabase.from("pedidos").select("*", { count: "exact", head: true }),
+        corte
+      ),
     ]);
     setContagens({
       pendentes: pendentes ?? 0,
@@ -4013,15 +4043,19 @@ function GerenciarPedidos({ onMudanca, cifraPorNome }) {
   const carregar = async (mostrarLoading = true) => {
     if (mostrarLoading) setCarregando(true);
     // Pendentes é a fila de trabalho: busca todos. Atendidos (últimos 15
-    // dias) e Arquivados (mais antigos que isso) são só histórico: limita
-    // a 200 pra não pesar a consulta.
+    // dias) e Arquivados (atendidos mais antigos + ignorados) são só
+    // histórico: limita a 200 pra não pesar a consulta.
     let query = supabase.from("pedidos").select("*");
     if (mostrar === "pendentes") {
-      query = query.eq("atendido", false).limit(500);
+      query = query.eq("atendido", false).eq("ignorado", false).limit(500);
     } else if (mostrar === "atendidos") {
-      query = query.eq("atendido", true).gte("created_at", dataCorteArquivo()).limit(200);
+      query = query
+        .eq("atendido", true)
+        .eq("ignorado", false)
+        .gte("created_at", dataCorteArquivo())
+        .limit(200);
     } else {
-      query = query.eq("atendido", true).lt("created_at", dataCorteArquivo()).limit(200);
+      query = filtroArquivados(query, dataCorteArquivo()).limit(200);
     }
     const { data, error } = await query.order("created_at", { ascending: false });
     if (!error) setPedidos(data ?? []);
@@ -4074,6 +4108,18 @@ function GerenciarPedidos({ onMudanca, cifraPorNome }) {
   const excluir = async (p) => {
     if (!window.confirm("Excluir este pedido?")) return;
     const { error } = await supabase.from("pedidos").delete().eq("id", p.id);
+    if (!error) carregar();
+  };
+
+  // Ignorar não exclui — só tira da fila de pendentes e manda pro Arquivo,
+  // pra rever depois quais pedidos chegaram e o que foi feito com cada um
+  const ignorarPedido = async (p) => {
+    const { error } = await supabase.from("pedidos").update({ ignorado: true }).eq("id", p.id);
+    if (!error) carregar();
+  };
+
+  const restaurarPedido = async (p) => {
+    const { error } = await supabase.from("pedidos").update({ ignorado: false }).eq("id", p.id);
     if (!error) carregar();
   };
 
@@ -4221,6 +4267,11 @@ function GerenciarPedidos({ onMudanca, cifraPorNome }) {
                         🙈 já é nossa, só oculta
                       </span>
                     )}
+                    {p.ignorado && (
+                      <span className="ml-2 text-[10px] uppercase tracking-wider text-cream-muted border border-noir-600 rounded-full px-2 py-0.5">
+                        ignorado
+                      </span>
+                    )}
                   </p>
                   {p.mensagem && (
                     <p className="text-cream-muted text-sm break-words">💬 {p.mensagem}</p>
@@ -4242,6 +4293,31 @@ function GerenciarPedidos({ onMudanca, cifraPorNome }) {
                 >
                   <Icone nome="aprender" className="w-3.5 h-3.5" />
                   Aprender
+                </button>
+              )}
+              {mostrar === "pendentes" && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    ignorarPedido(p);
+                  }}
+                  title="Ignorar — vai pro Arquivo, sem excluir"
+                  className="shrink-0 self-center inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-noir-700 text-xs text-cream-muted hover:text-cream hover:border-noir-600 transition"
+                >
+                  <Icone nome="arquivo" className="w-3.5 h-3.5" />
+                  Ignorar
+                </button>
+              )}
+              {mostrar === "arquivados" && p.ignorado && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    restaurarPedido(p);
+                  }}
+                  title="Restaurar para pendentes"
+                  className="shrink-0 self-center inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-noir-700 text-xs text-cream-muted hover:text-gold-300 hover:border-gold-600 transition"
+                >
+                  Restaurar
                 </button>
               )}
             </li>
@@ -4275,6 +4351,14 @@ function GerenciarPedidos({ onMudanca, cifraPorNome }) {
             alternarAtendido(p);
             setPedidoAberto(null);
           }}
+          onIgnorar={(p) => {
+            ignorarPedido(p);
+            setPedidoAberto(null);
+          }}
+          onRestaurar={(p) => {
+            restaurarPedido(p);
+            setPedidoAberto(null);
+          }}
           onExcluir={(p) => {
             excluir(p);
             setPedidoAberto(null);
@@ -4293,6 +4377,8 @@ function DetalhePedidoModal({
   onVerCifra,
   onAprender,
   onAlternarAtendido,
+  onIgnorar,
+  onRestaurar,
   onExcluir,
 }) {
   const ehSugestao = p.pedido.startsWith(PREFIXO_SUGESTAO);
@@ -4323,12 +4409,14 @@ function DetalhePedidoModal({
               )}
               <span
                 className={`text-[10px] uppercase tracking-wider rounded-full px-2 py-0.5 border ${
-                  p.atendido
-                    ? "text-emerald-300 border-emerald-700"
-                    : "text-amber-300 border-amber-700"
+                  p.ignorado
+                    ? "text-cream-muted border-noir-600"
+                    : p.atendido
+                      ? "text-emerald-300 border-emerald-700"
+                      : "text-amber-300 border-amber-700"
                 }`}
               >
-                {p.atendido ? "atendido" : "pendente"}
+                {p.ignorado ? "ignorado" : p.atendido ? "atendido" : "pendente"}
               </span>
             </div>
           </div>
@@ -4363,7 +4451,7 @@ function DetalhePedidoModal({
               Ver cifra
             </button>
           )}
-          {!p.atendido && ehSugestao && (
+          {!p.atendido && !p.ignorado && ehSugestao && (
             <button
               onClick={() => onAprender(p)}
               className="px-4 py-2 rounded-xl border border-gold-600 text-sm text-gold-300 hover:bg-noir-800 transition inline-flex items-center gap-1.5"
@@ -4372,12 +4460,31 @@ function DetalhePedidoModal({
               Aprender
             </button>
           )}
-          <button
-            onClick={() => onAlternarAtendido(p)}
-            className="px-4 py-2 rounded-xl border border-noir-700 text-sm text-cream-muted hover:text-gold-300 hover:border-gold-600 transition"
-          >
-            {p.atendido ? "Reabrir" : "✓ Atendido"}
-          </button>
+          {!p.ignorado && (
+            <button
+              onClick={() => onAlternarAtendido(p)}
+              className="px-4 py-2 rounded-xl border border-noir-700 text-sm text-cream-muted hover:text-gold-300 hover:border-gold-600 transition"
+            >
+              {p.atendido ? "Reabrir" : "✓ Atendido"}
+            </button>
+          )}
+          {!p.atendido && !p.ignorado && (
+            <button
+              onClick={() => onIgnorar(p)}
+              className="px-4 py-2 rounded-xl border border-noir-700 text-sm text-cream-muted hover:text-cream hover:border-noir-600 transition inline-flex items-center gap-1.5"
+            >
+              <Icone nome="arquivo" className="w-4 h-4" />
+              Ignorar
+            </button>
+          )}
+          {p.ignorado && (
+            <button
+              onClick={() => onRestaurar(p)}
+              className="px-4 py-2 rounded-xl border border-noir-700 text-sm text-cream-muted hover:text-gold-300 hover:border-gold-600 transition"
+            >
+              Restaurar
+            </button>
+          )}
           <button
             onClick={() => onExcluir(p)}
             className="px-4 py-2 rounded-xl border border-noir-700 text-sm text-cream-muted hover:text-red-400 hover:border-red-900 transition"
