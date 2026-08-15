@@ -15,6 +15,12 @@ pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 const VELOCIDADE_MIN = 5; // px/s
 const VELOCIDADE_MAX = 120;
 const VELOCIDADE_PASSO = 5;
+// Arrastar 1 dedo na tela de texto ajusta a velocidade (direita = mais
+// rápido, esquerda = mais devagar — como segurar o botão "+"/"−"). Só entra
+// em ação depois desse tanto de movimento lateral, e só se o gesto for
+// claramente mais horizontal que vertical, pra não atrapalhar o scroll
+// manual pra cima/baixo.
+const ARRASTE_VELOCIDADE_LIMIAR_PX = 12;
 const ZOOM_MIN = 0.6;
 const ZOOM_MAX = 2.5;
 // Resolução "nativa" da imagem renderizada — deliberadamente menor que
@@ -95,11 +101,11 @@ function LinhaCho({ segmentos }) {
   return (
     <div className="flex flex-wrap items-end">
       {segmentos.map((seg, i) => (
-        <span key={i} className="inline-flex flex-col items-start">
+        <span key={i} className="inline-flex flex-col items-start max-w-full min-w-0">
           <span className="text-gold-400 font-semibold leading-none text-[0.72em] h-[1.3em] select-none">
             {seg.chord || " "}
           </span>
-          <span className="whitespace-pre leading-snug">{seg.texto || " "}</span>
+          <span className="whitespace-pre-wrap break-words leading-snug">{seg.texto || " "}</span>
         </span>
       ))}
     </div>
@@ -178,7 +184,11 @@ export default function Cifra() {
   const zoomAnteriorRef = useRef(zoom); // para compensar a velocidade quando o zoom muda
   const renderTasksRef = useRef([]);
   const pinchRef = useRef(null); // { distancia, zoomBase, dedos } enquanto os dedos estão na tela
-  const pinchOcorreuRef = useRef(false); // evita alternar play/pause ao soltar o pinça
+  const gestoOcorreuRef = useRef(false); // evita alternar play/pause ao soltar o pinça
+  // { x0, y0, velocidadeBase, ativo } enquanto 1 dedo arrasta pra ajustar a
+  // velocidade — só usado na visão de texto (no PDF/imagem, 1 dedo já é o
+  // gesto de "arrastar pra ver o zoom", então não disputa com ele aqui)
+  const arrasteVelocidadeRef = useRef(null);
   const montadoRef = useRef(true); // false assim que a tela é desmontada (ex.: botão Voltar)
 
   rodandoRef.current = rodando;
@@ -940,8 +950,8 @@ export default function Cifra() {
       <div
         ref={scrollRef}
         onClick={() => {
-          if (pinchOcorreuRef.current) {
-            pinchOcorreuRef.current = false;
+          if (gestoOcorreuRef.current) {
+            gestoOcorreuRef.current = false;
             return;
           }
           if (!erro && !modoEdicao) setRodando((r) => !r);
@@ -953,37 +963,73 @@ export default function Cifra() {
               zoomBase: zoom,
               dedos: e.touches.length,
             };
-            pinchOcorreuRef.current = true;
+            gestoOcorreuRef.current = true;
+            arrasteVelocidadeRef.current = null;
+          } else if (e.touches.length === 1 && choBlocos && !modoEdicao) {
+            const t = e.touches[0];
+            arrasteVelocidadeRef.current = {
+              x0: t.clientX,
+              y0: t.clientY,
+              velocidadeBase: velocidadeRef.current,
+              ativo: false,
+            };
           }
         }}
         onTouchMove={(e) => {
-          if (e.touches.length < 2) return;
-          // Mudou a quantidade de dedos (3º dedo encostou, ou um soltou e
-          // ainda sobraram 2) — recomeça a referência em vez de saltar
-          if (!pinchRef.current || pinchRef.current.dedos !== e.touches.length) {
-            pinchRef.current = {
-              distancia: distanciaEntreToques(e.touches),
-              zoomBase: zoom,
-              dedos: e.touches.length,
-            };
+          if (e.touches.length >= 2) {
+            // Mudou a quantidade de dedos (3º dedo encostou, ou um soltou e
+            // ainda sobraram 2) — recomeça a referência em vez de saltar
+            if (!pinchRef.current || pinchRef.current.dedos !== e.touches.length) {
+              pinchRef.current = {
+                distancia: distanciaEntreToques(e.touches),
+                zoomBase: zoom,
+                dedos: e.touches.length,
+              };
+              return;
+            }
+            const distancia = distanciaEntreToques(e.touches);
+            const fator = distancia / pinchRef.current.distancia;
+            const novoZoom = Math.max(
+              ZOOM_MIN,
+              Math.min(ZOOM_MAX, +(pinchRef.current.zoomBase * fator).toFixed(2))
+            );
+            // Como o zoom agora só redimensiona imagens já prontas via CSS
+            // (não recria canvas), pode aplicar direto a cada frame do
+            // gesto — instantâneo, linear, sem custo de re-renderização
+            setZoom(novoZoom);
             return;
           }
-          const distancia = distanciaEntreToques(e.touches);
-          const fator = distancia / pinchRef.current.distancia;
-          const novoZoom = Math.max(
-            ZOOM_MIN,
-            Math.min(ZOOM_MAX, +(pinchRef.current.zoomBase * fator).toFixed(2))
-          );
-          // Como o zoom agora só redimensiona imagens já prontas via CSS
-          // (não recria canvas), pode aplicar direto a cada frame do
-          // gesto — instantâneo, linear, sem custo de re-renderização
-          setZoom(novoZoom);
+          if (e.touches.length === 1 && arrasteVelocidadeRef.current) {
+            const arraste = arrasteVelocidadeRef.current;
+            const t = e.touches[0];
+            const dx = t.clientX - arraste.x0;
+            const dy = t.clientY - arraste.y0;
+            if (!arraste.ativo) {
+              // só "assume" o gesto como ajuste de velocidade quando o
+              // movimento lateral já é claramente maior que o vertical —
+              // um scroll normal pra cima/baixo não deve disparar isso
+              if (Math.abs(dx) < ARRASTE_VELOCIDADE_LIMIAR_PX || Math.abs(dx) < Math.abs(dy) * 1.5) {
+                return;
+              }
+              arraste.ativo = true;
+              gestoOcorreuRef.current = true; // reaproveita a trava do onClick de play/pause
+            }
+            // Arrastar até a metade da largura da tela cobre toda a faixa
+            // MIN–MAX — pra direita aumenta (como segurar o "+"), pra
+            // esquerda diminui (como segurar o "−")
+            const alcance = (scrollRef.current?.clientWidth || 300) / 2;
+            const delta = Math.round((dx / alcance) * (VELOCIDADE_MAX - VELOCIDADE_MIN));
+            const nova = Math.max(VELOCIDADE_MIN, Math.min(VELOCIDADE_MAX, arraste.velocidadeBase + delta));
+            setVelocidade(nova);
+          }
         }}
         onTouchEnd={(e) => {
           if (e.touches.length < 2) pinchRef.current = null;
+          if (e.touches.length === 0) arrasteVelocidadeRef.current = null;
         }}
         onTouchCancel={(e) => {
           if (e.touches.length < 2) pinchRef.current = null;
+          if (e.touches.length === 0) arrasteVelocidadeRef.current = null;
         }}
         className="flex-1 overflow-auto bg-noir-950 px-2 py-3 cursor-pointer"
         style={{ touchAction: "pan-x pan-y" }}

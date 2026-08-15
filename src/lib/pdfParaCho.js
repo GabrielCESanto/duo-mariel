@@ -10,6 +10,15 @@
 // scripts/pdf_para_cho.py). pdfParaChordPro devolve null nesses casos, e
 // a música continua só com o PDF normal.
 import * as pdfjs from "pdfjs-dist";
+import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+
+// Sem isso, getDocument só funciona se algum outro módulo (Cifra.jsx,
+// pdfParaImagens.js) já tiver configurado o worker antes nessa mesma
+// aba — quem chega direto em Admin > Músicas sem passar por Cifra.jsx
+// primeiro cai num getDocument sem worker, que falha silenciosamente
+// (o catch em Admin.jsx trata como conversão malsucedida) mesmo em PDFs
+// perfeitamente conversíveis.
+pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
 // "-" no fim da classe de caracteres = literal (não forma intervalo com o
 // caractere anterior, diferente de "+-/" no meio, que seria um intervalo
@@ -106,13 +115,17 @@ function mesclarAcordeLetra(linhaAcordes, linhaLetra) {
 
 const linhaSoAcordesParaCho = (linha) => linha.map((w) => `[${w.text}]`).join(" ");
 
-// Fonte sem mapa de caracteres válido (texto vira "(cid:19)" etc.) ou
-// página sem texto nenhum (PDF escaneado) — os dois pedem OCR, que não
-// dá pra fazer no navegador
+// Fonte sem mapa de caracteres válido — às vezes vira "(cid:19)" no texto,
+// às vezes (fonte customizada sem ToUnicode) vira caracteres de controle
+// direto (códigos 0 a 31, que nunca aparecem em texto de verdade) — ou
+// página sem texto nenhum (PDF escaneado). Os três pedem OCR, que não dá
+// pra fazer no navegador.
 function paginasTemProblema(paginas) {
   const totalPalavras = paginas.reduce((n, p) => n + p.length, 0);
   if (totalPalavras === 0) return true;
-  return paginas.some((pagina) => pagina.some((w) => w.text.includes("(cid:")));
+  return paginas.some((pagina) =>
+    pagina.some((w) => w.text.includes("(cid:") || /[\x00-\x1f]/.test(w.text))
+  );
 }
 
 function processarPaginas(paginas) {

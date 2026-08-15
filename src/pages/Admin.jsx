@@ -454,7 +454,8 @@ function Painel() {
     const { count, error } = await supabase
       .from("pedidos")
       .select("*", { count: "exact", head: true })
-      .eq("atendido", false);
+      .eq("atendido", false)
+      .eq("ignorado", false);
     if (!error) setPendentes(count ?? 0);
   };
 
