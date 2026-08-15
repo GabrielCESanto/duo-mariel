@@ -1338,6 +1338,85 @@ function BotaoOuvir({ url, nome, artista }) {
 
 /* ------------------------- CIFRAS ------------------------- */
 
+// Dropdown com caixa de busca pra filtrar a lista de opções — usado pelos
+// filtros de Artista e Estilo (não dá pra digitar-pra-buscar num <select>
+// nativo de forma consistente entre navegadores)
+function SeletorComBusca({ label, opcoes, valor, onMudar }) {
+  const [aberto, setAberto] = useState(false);
+  const [busca, setBusca] = useState("");
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!aberto) return;
+    const fecharFora = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setAberto(false);
+    };
+    document.addEventListener("mousedown", fecharFora);
+    return () => document.removeEventListener("mousedown", fecharFora);
+  }, [aberto]);
+
+  const filtradas = opcoes.filter((o) => normalizarNome(o).includes(normalizarNome(busca)));
+
+  const escolher = (o) => {
+    onMudar(o);
+    setAberto(false);
+    setBusca("");
+  };
+
+  return (
+    <div className="relative flex-1 min-w-0" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setAberto((v) => !v)}
+        className={`input-noir w-full text-left flex items-center justify-between gap-2 ${
+          valor ? "text-cream" : "text-cream-muted"
+        }`}
+      >
+        <span className="truncate">{valor || `Todos os ${label.toLowerCase()}`}</span>
+        <span className="text-cream-muted text-xs shrink-0">▾</span>
+      </button>
+      {aberto && (
+        <div className="absolute z-20 mt-1 w-full rounded-xl border border-noir-700 bg-noir-900 shadow-xl overflow-hidden">
+          <input
+            autoFocus
+            className="input-noir rounded-none border-0 border-b border-noir-700"
+            placeholder={`Buscar ${label.toLowerCase()}...`}
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+          />
+          <ul className="max-h-56 overflow-y-auto">
+            <li>
+              <button
+                type="button"
+                onClick={() => escolher("")}
+                className="w-full text-left px-3 py-2 text-sm text-cream-muted hover:bg-noir-800 transition"
+              >
+                Todos os {label.toLowerCase()}
+              </button>
+            </li>
+            {filtradas.map((o) => (
+              <li key={o}>
+                <button
+                  type="button"
+                  onClick={() => escolher(o)}
+                  className={`w-full text-left px-3 py-2 text-sm truncate transition ${
+                    o === valor ? "text-gold-300 bg-noir-800" : "text-cream hover:bg-noir-800"
+                  }`}
+                >
+                  {o}
+                </button>
+              </li>
+            ))}
+            {filtradas.length === 0 && (
+              <li className="px-3 py-2 text-sm text-cream-muted">Nada encontrado.</li>
+            )}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Sorteia `n` itens distintos de uma lista
 function sortearItens(lista, n) {
   const copia = [...lista];
@@ -1352,6 +1431,8 @@ function AbaCifras() {
   const [musicas, setMusicas] = useState([]);
   const [carregando, setCarregando] = useState(true);
   const [filtro, setFiltro] = useState("");
+  const [filtroArtista, setFiltroArtista] = useState("");
+  const [filtroEstilo, setFiltroEstilo] = useState("");
   const [aleatorias, setAleatorias] = useState([]);
   const [progresso, setProgresso] = useState(() => estadoDownloadCifras());
   const [modalAberto, setModalAberto] = useState(false);
@@ -1397,8 +1478,19 @@ function AbaCifras() {
   // remontar (o estado vive fora do componente, em src/lib/cifraCache.js)
   useEffect(() => assinarDownloadCifras(setProgresso), []);
 
+  const artistas = useMemo(
+    () => [...new Set(musicas.map((m) => m.artista).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    [musicas]
+  );
+  const estilos = useMemo(
+    () => [...new Set(musicas.map((m) => m.estilo).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    [musicas]
+  );
+
   const visiveis = musicas.filter((m) => {
     if (soFavoritas && !m.favorito) return false;
+    if (filtroArtista && m.artista !== filtroArtista) return false;
+    if (filtroEstilo && m.estilo !== filtroEstilo) return false;
     const q = filtro.trim().toLowerCase();
     if (!q) return true;
     return `${m.nome} ${m.artista} ${m.estilo ?? ""}`.toLowerCase().includes(q);
@@ -1467,6 +1559,11 @@ function AbaCifras() {
         >
           {soFavoritas ? "★" : "☆"}
         </button>
+      </div>
+
+      <div className="flex gap-2 mb-3 flex-col sm:flex-row">
+        <SeletorComBusca label="Artistas" opcoes={artistas} valor={filtroArtista} onMudar={setFiltroArtista} />
+        <SeletorComBusca label="Estilos" opcoes={estilos} valor={filtroEstilo} onMudar={setFiltroEstilo} />
       </div>
 
       {carregando ? (
@@ -2484,6 +2581,7 @@ function GerenciarAgenda() {
 const chaveRepertorio = (nome, artista) => `${normalizarNome(nome)}|${normalizarNome(artista)}`;
 
 function AbaEventoCliente() {
+  const navigate = useNavigate();
   const [eventos, setEventos] = useState([]);
   const [contagens, setContagens] = useState({}); // evento_id -> quantidade de músicas
   const [carregandoEventos, setCarregandoEventos] = useState(true);
@@ -2491,6 +2589,7 @@ function AbaEventoCliente() {
   const [musicasEvento, setMusicasEvento] = useState([]);
   const [carregandoMusicas, setCarregandoMusicas] = useState(false);
   const [filtroRepertorio, setFiltroRepertorio] = useState("todas"); // todas | com | sem
+  const [modalMusicaId, setModalMusicaId] = useState(null);
 
   // Senha do evento aberto (cada show tem a sua — vazio = playlist
   // desativada pra esse evento)
@@ -2507,10 +2606,15 @@ function AbaEventoCliente() {
         if (!error) setRepertorio(data ?? []);
       });
   }, []);
-  const repertorioSet = useMemo(
-    () => new Set(repertorio.map((m) => chaveRepertorio(m.nome, m.artista))),
-    [repertorio]
-  );
+
+  // Um pedido "está no repertório" quando foi linkado manualmente
+  // (musica_id) OU quando nome+artista bate automaticamente — grafias
+  // diferentes (ex.: pedido com um nome, repertório cadastrado com outro)
+  // não batem sozinhas e precisam do link manual
+  const resolverMusicaId = (m) =>
+    m.musica_id ??
+    repertorio.find((r) => chaveRepertorio(r.nome, r.artista) === chaveRepertorio(m.nome, m.artista))?.id ??
+    null;
 
   const carregarEventos = async () => {
     setCarregandoEventos(true);
@@ -2572,7 +2676,7 @@ function AbaEventoCliente() {
     setCarregandoMusicas(true);
     const { data, error } = await supabase
       .from("pedidos_evento")
-      .select("id, nome, artista, capa, preview_url, created_at")
+      .select("id, nome, artista, capa, preview_url, created_at, musica_id")
       .eq("evento_id", ev.id)
       .order("created_at");
     if (!error) setMusicasEvento(data ?? []);
@@ -2590,10 +2694,25 @@ function AbaEventoCliente() {
     setContagens((c) => ({ ...c, [eventoAbertoId]: Math.max(0, (c[eventoAbertoId] ?? 1) - 1) }));
   };
 
-  const [adicionandoRepertorioId, setAdicionandoRepertorioId] = useState(null);
+  // Grava o vínculo manual (pedidos_evento.musica_id) — usado tanto depois
+  // de criar/achar a música quanto quando o usuário escolhe "Linkar"
+  const linkarMusica = async (m, musica) => {
+    const { error } = await supabase
+      .from("pedidos_evento")
+      .update({ musica_id: musica.id })
+      .eq("id", m.id);
+    if (error) {
+      console.error(error);
+      return;
+    }
+    setRepertorio((rep) => (rep.some((r) => r.id === musica.id) ? rep : [...rep, musica]));
+    setMusicasEvento((lista) =>
+      lista.map((x) => (x.id === m.id ? { ...x, musica_id: musica.id } : x))
+    );
+    setModalMusicaId(null);
+  };
 
   const adicionarAoRepertorio = async (m) => {
-    setAdicionandoRepertorioId(m.id);
     const { data: existente } = await supabase
       .from("musicas")
       .select("id, nome, artista")
@@ -2607,13 +2726,12 @@ function AbaEventoCliente() {
       .select("id, nome, artista")
       .single()
     ).data;
-
-    setAdicionandoRepertorioId(null);
     if (!musica) return;
-    setRepertorio((rep) => (rep.some((r) => r.id === musica.id) ? rep : [...rep, musica]));
+    await linkarMusica(m, musica);
   };
 
   const eventoAberto = eventos.find((e) => e.id === eventoAbertoId) ?? null;
+  const modalMusica = musicasEvento.find((m) => m.id === modalMusicaId) ?? null;
 
   return (
     <div className="space-y-6">
@@ -2724,15 +2842,13 @@ function AbaEventoCliente() {
                   [
                     "com",
                     `Já no repertório (${
-                      musicasEvento.filter((m) => repertorioSet.has(chaveRepertorio(m.nome, m.artista)))
-                        .length
+                      musicasEvento.filter((m) => resolverMusicaId(m)).length
                     })`,
                   ],
                   [
                     "sem",
                     `Fora do repertório (${
-                      musicasEvento.filter((m) => !repertorioSet.has(chaveRepertorio(m.nome, m.artista)))
-                        .length
+                      musicasEvento.filter((m) => !resolverMusicaId(m)).length
                     })`,
                   ],
                 ].map(([valor, rotulo]) => (
@@ -2753,17 +2869,20 @@ function AbaEventoCliente() {
               <ul className="divide-y divide-noir-800 max-h-[420px] overflow-y-auto pr-2">
                 {musicasEvento
                   .filter((m) => {
-                    const noRepertorio = repertorioSet.has(chaveRepertorio(m.nome, m.artista));
+                    const noRepertorio = !!resolverMusicaId(m);
                     if (filtroRepertorio === "com") return noRepertorio;
                     if (filtroRepertorio === "sem") return !noRepertorio;
                     return true;
                   })
                   .map((m) => {
-                    const noRepertorio = repertorioSet.has(chaveRepertorio(m.nome, m.artista));
+                    const noRepertorio = !!resolverMusicaId(m);
                     return (
                       <li key={m.id} className="py-3 flex items-center gap-3">
                         <BotaoOuvir url={m.preview_url} />
-                        <div className="min-w-0 flex-1">
+                        <button
+                          onClick={() => setModalMusicaId(m.id)}
+                          className="min-w-0 flex-1 text-left hover:bg-noir-800/50 rounded-lg px-2 -mx-2 py-1 transition"
+                        >
                           <p className="text-cream truncate">
                             {m.nome}
                             <span
@@ -2777,22 +2896,6 @@ function AbaEventoCliente() {
                             </span>
                           </p>
                           <p className="text-cream-muted text-sm truncate">{m.artista}</p>
-                        </div>
-                        {!noRepertorio && (
-                          <button
-                            onClick={() => adicionarAoRepertorio(m)}
-                            disabled={adicionandoRepertorioId === m.id}
-                            title="Adicionar essa música ao repertório do Duo Mariel"
-                            className="shrink-0 px-3 py-1.5 rounded-lg border border-gold-700 text-xs text-gold-300 hover:bg-noir-800 transition disabled:opacity-50"
-                          >
-                            {adicionandoRepertorioId === m.id ? "..." : "+ Repertório"}
-                          </button>
-                        )}
-                        <button
-                          onClick={() => removerMusica(m)}
-                          className="shrink-0 px-3 py-1.5 rounded-lg border border-noir-700 text-xs text-cream-muted hover:text-red-400 hover:border-red-900 transition"
-                        >
-                          Remover
                         </button>
                       </li>
                     );
@@ -2802,6 +2905,134 @@ function AbaEventoCliente() {
           )}
         </div>
       )}
+
+      {modalMusica && (
+        <ModalAcaoMusicaEvento
+          musica={modalMusica}
+          resolvedId={resolverMusicaId(modalMusica)}
+          repertorio={repertorio}
+          navigate={navigate}
+          onFechar={() => setModalMusicaId(null)}
+          onAdicionar={adicionarAoRepertorio}
+          onLinkar={linkarMusica}
+          onRemover={removerMusica}
+        />
+      )}
+    </div>
+  );
+}
+
+// Ação sobre um pedido de evento: adicionar ao repertório, linkar com uma
+// música já cadastrada (grafia diferente), ir pra cifra ou remover
+function ModalAcaoMusicaEvento({ musica, resolvedId, repertorio, navigate, onFechar, onAdicionar, onLinkar, onRemover }) {
+  const [etapa, setEtapa] = useState("menu"); // menu | linkar
+  const [buscaLink, setBuscaLink] = useState("");
+  const [processando, setProcessando] = useState(false);
+
+  const candidatos = useMemo(() => {
+    const q = normalizarNome(buscaLink);
+    const lista = q
+      ? repertorio.filter((r) => normalizarNome(`${r.nome} ${r.artista}`).includes(q))
+      : repertorio;
+    return lista.slice(0, 50);
+  }, [repertorio, buscaLink]);
+
+  const executar = async (fn) => {
+    setProcessando(true);
+    await fn();
+    setProcessando(false);
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 p-4"
+      onClick={onFechar}
+    >
+      <div
+        className="w-full max-w-md rounded-2xl border border-noir-700 bg-noir-900 p-5"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3 mb-4">
+          <div className="min-w-0">
+            <p className="text-cream truncate">{musica.nome}</p>
+            <p className="text-cream-muted text-sm truncate">{musica.artista}</p>
+          </div>
+          <button
+            onClick={onFechar}
+            aria-label="Fechar"
+            className="shrink-0 text-cream-muted hover:text-cream text-xl leading-none"
+          >
+            ×
+          </button>
+        </div>
+
+        {etapa === "menu" ? (
+          <div className="space-y-2">
+            <button
+              onClick={() => executar(() => onAdicionar(musica))}
+              disabled={!!resolvedId || processando}
+              className="w-full text-left px-4 py-3 rounded-xl border border-gold-700 text-gold-300 hover:bg-noir-800 transition disabled:opacity-40"
+            >
+              + Adicionar no repertório
+            </button>
+            <button
+              onClick={() => setEtapa("linkar")}
+              disabled={processando}
+              className="w-full text-left px-4 py-3 rounded-xl border border-noir-700 text-cream hover:bg-noir-800 transition disabled:opacity-40"
+            >
+              Linkar com música existente
+            </button>
+            <button
+              onClick={() => resolvedId && navigate(`/cifra/${resolvedId}`)}
+              disabled={!resolvedId}
+              className="w-full text-left px-4 py-3 rounded-xl border border-noir-700 text-cream hover:bg-noir-800 transition disabled:opacity-40"
+            >
+              Ir para a cifra
+            </button>
+            <button
+              onClick={() => executar(() => onRemover(musica))}
+              disabled={processando}
+              className="w-full text-left px-4 py-3 rounded-xl border border-noir-700 text-red-400 hover:bg-noir-800 hover:border-red-900 transition disabled:opacity-40"
+            >
+              Remover da playlist
+            </button>
+          </div>
+        ) : (
+          <div>
+            <button
+              onClick={() => setEtapa("menu")}
+              className="text-xs text-cream-muted hover:text-gold-300 mb-3"
+            >
+              ‹ Voltar
+            </button>
+            <input
+              autoFocus
+              className="input-noir mb-2"
+              placeholder="Buscar no repertório..."
+              value={buscaLink}
+              onChange={(e) => setBuscaLink(e.target.value)}
+            />
+            <ul className="max-h-64 overflow-y-auto divide-y divide-noir-800">
+              {candidatos.map((r) => (
+                <li key={r.id}>
+                  <button
+                    onClick={() => executar(() => onLinkar(musica, r))}
+                    disabled={processando}
+                    className={`w-full text-left px-2 py-2 text-sm truncate transition disabled:opacity-40 ${
+                      r.id === resolvedId ? "text-gold-300" : "text-cream hover:text-gold-300"
+                    }`}
+                  >
+                    {r.nome} <span className="text-cream-muted">— {r.artista}</span>
+                  </button>
+                </li>
+              ))}
+              {candidatos.length === 0 && (
+                <li className="py-3 text-cream-muted text-sm">Nada encontrado.</li>
+              )}
+            </ul>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
