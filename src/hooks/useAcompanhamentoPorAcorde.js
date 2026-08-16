@@ -13,14 +13,24 @@ import {
 } from "../lib/reconhecimentoVoz";
 
 // Só pula pra uma frase quando o texto ouvido bater pelo menos essa
-// fração das palavras com o texto dela.
-const LIMIAR_VOZ = 0.5;
+// fração das palavras com o texto dela. Testado em 0,5 (rígido demais —
+// bastava a voz reconhecer só metade errado de uma linha curta pra nunca
+// passar) e depois em 0,4; ajustado pra 0,35 depois de mais testes reais.
+const LIMIAR_VOZ = 0.35;
 // Só olha as próximas N frases a partir da atual — testado com uma busca
 // bem mais ampla (25 frases à frente) e ficou pior: matches por
 // coincidência lá na frente, e mais lento pra recalcular a cada frase
 // ouvida. Uma janela pequena (a próxima linha, e mais umas 2-4 depois)
 // já cobre o caso real (pular uma repetição perdida) sem esse ruído.
 const JANELA_VOZ = 5;
+// O Chrome, no modo "continuous", às vezes demora muito pra fechar uma
+// frase como definitiva — enquanto isso, o resultado provisório vai
+// crescendo (podendo acumular quase uma estrofe inteira) antes de dar um
+// "isFinal". Comparar esse texto todo contra uma linha-alvo curta dilui a
+// pontuação sem necessidade — por isso só as últimas palavras ouvidas
+// entram na comparação (o que interessa é o que está sendo cantado
+// AGORA, não o histórico da frase toda).
+const PALAVRAS_RECENTES_VOZ = 5;
 
 // Só avança por acorde quando o próximo bate MELHOR que o atual por essa
 // margem — evita trocar de linha por ruído/harmônico parecido.
@@ -33,6 +43,13 @@ const TEMPO_ESTAVEL_ACORDE_MS = 220;
 // acorde raramente passa de ~40-50% mesmo acertando — nos testes, acorde
 // certo ficou em 35-40%, errado em ~15%.
 const SIMILARIDADE_MINIMA_ACORDE = 0.25;
+// Enquanto a voz estiver ativa e tiver ouvido algo há pouco tempo, o
+// acorde não deve tentar avançar sozinho — testado com os dois ligados
+// juntos e, tocando o ritmo (não uma nota sustentada), o acorde errava
+// mais e "brigava" com a posição que a voz já tinha acertado. O acorde só
+// assume de novo depois de um tempo sem voz nenhuma (silêncio real, ex.:
+// trecho instrumental).
+const SILENCIO_VOZ_PARA_ACORDE_MS = 2000;
 
 // Escuta o microfone e acompanha, sozinho, em qual linha da cifra o
 // músico está cantando agora — pra rolar a tela sem precisar de scroll
@@ -68,6 +85,7 @@ export function useAcompanhamentoPorAcorde(blocos, { usarVoz = true, usarAcorde 
   const rafRef = useRef(null);
   const estavelDesdeRef = useRef(0);
   const vozRef = useRef(null);
+  const ultimaVozEmRef = useRef(0);
 
   // Muda de música (ou a cifra foi editada) — recomeça do início
   useEffect(() => {
@@ -86,13 +104,18 @@ export function useAcompanhamentoPorAcorde(blocos, { usarVoz = true, usarAcorde 
   // pra frente (nunca volta) — uma palavra mal reconhecida batendo por
   // acaso com um trecho anterior não deve fazer a tela voltar.
   const avaliarVoz = (texto) => {
+    ultimaVozEmRef.current = performance.now();
+
+    // Só as últimas palavras — ver comentário de PALAVRAS_RECENTES_VOZ
+    const recorte = texto.trim().split(/\s+/).filter(Boolean).slice(-PALAVRAS_RECENTES_VOZ).join(" ");
+
     const inicio = indiceRef.current;
     const fim = Math.min(frases.length, inicio + JANELA_VOZ);
     let melhorIndice = -1;
     let melhorPontuacao = LIMIAR_VOZ;
 
     for (let i = inicio; i < fim; i++) {
-      const pontuacao = pontuarSemelhancaTexto(texto, frases[i].contextoTexto);
+      const pontuacao = pontuarSemelhancaTexto(recorte, frases[i].contextoTexto);
       if (pontuacao > melhorPontuacao) {
         melhorPontuacao = pontuacao;
         melhorIndice = i;
@@ -106,6 +129,16 @@ export function useAcompanhamentoPorAcorde(blocos, { usarVoz = true, usarAcorde 
     const analyser = analyserRef.current;
     const ctx = contextoRef.current;
     if (!analyser || !ctx) return;
+
+    // A voz tem prioridade: se ela estiver ativa e ouviu algo há pouco,
+    // deixa o acorde de lado (ver SILENCIO_VOZ_PARA_ACORDE_MS)
+    const vozAtivaAgora =
+      usarVoz && reconhecimentoDeVozSuportado && performance.now() - ultimaVozEmRef.current < SILENCIO_VOZ_PARA_ACORDE_MS;
+    if (vozAtivaAgora) {
+      estavelDesdeRef.current = 0;
+      rafRef.current = requestAnimationFrame(lacoAcorde);
+      return;
+    }
 
     const chroma = extrairChroma(analyser, ctx.sampleRate);
     const atual = frases[indiceRef.current];

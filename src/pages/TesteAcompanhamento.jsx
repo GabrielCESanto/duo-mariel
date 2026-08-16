@@ -261,15 +261,46 @@ function Viewer({ id }) {
   );
 }
 
+// t: 0..1 -> 0..1, acelera e desacelera (em vez de constante) — dá a
+// sensação de "acompanhar a leitura" mesmo em saltos maiores, em vez de
+// uma trocada seca de posição
+function suavizar(t) {
+  return t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
+}
+
+// Rola a JANELA (não o elemento) até centralizar `alvo` — com duração
+// fixa e evitando cancelar/reiniciar via scrollIntoView nativo, que em
+// alguns navegadores decide uma duração curta demais pra saltos grandes e
+// parece "pular" em vez de rolar. `sinalizarParada` permite interromper a
+// animação se uma frase mais nova chegar antes dela terminar.
+function rolarAteCentralizar(alvo, sinalizarParada) {
+  if (!alvo) return;
+  const DURACAO_MS = 550;
+  const retangulo = alvo.getBoundingClientRect();
+  const alvoY = window.scrollY + retangulo.top - window.innerHeight / 2 + retangulo.height / 2;
+  const inicioY = window.scrollY;
+  const distancia = alvoY - inicioY;
+  const t0 = performance.now();
+
+  const passo = (agora) => {
+    if (sinalizarParada.parado) return;
+    const progresso = Math.min(1, (agora - t0) / DURACAO_MS);
+    window.scrollTo(0, inicioY + distancia * suavizar(progresso));
+    if (progresso < 1) requestAnimationFrame(passo);
+  };
+  requestAnimationFrame(passo);
+}
+
 function CifraChoAcompanhada({ blocos, fraseAtual }) {
   const refsLinha = useRef({});
 
   useEffect(() => {
     if (!fraseAtual) return;
-    refsLinha.current[fraseAtual.blocoIndex]?.scrollIntoView({
-      behavior: "smooth",
-      block: "center",
-    });
+    const sinalizarParada = { parado: false };
+    rolarAteCentralizar(refsLinha.current[fraseAtual.blocoIndex], sinalizarParada);
+    return () => {
+      sinalizarParada.parado = true;
+    };
   }, [fraseAtual]);
 
   return (

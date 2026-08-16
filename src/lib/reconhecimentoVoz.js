@@ -8,12 +8,47 @@
 
 import { normalizarNome } from "./texto";
 
+// Distância de edição (Levenshtein) entre duas strings já normalizadas —
+// usada só pra tolerar quase-acertos (uma letra trocada, plural/singular,
+// conjugação um pouco diferente do que a letra da música tem escrito),
+// não pra achar a palavra "mais parecida" em geral.
+function distanciaEdicao(a, b) {
+  const m = a.length;
+  const n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+
+  const linha = new Array(n + 1);
+  for (let j = 0; j <= n; j++) linha[j] = j;
+
+  for (let i = 1; i <= m; i++) {
+    let anterior = linha[0];
+    linha[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const temp = linha[j];
+      linha[j] = a[i - 1] === b[j - 1] ? anterior : 1 + Math.min(anterior, linha[j], linha[j - 1]);
+      anterior = temp;
+    }
+  }
+  return linha[n];
+}
+
+// Duas palavras "batem" se forem iguais ou bem parecidas — tolerância
+// proporcional ao tamanho da palavra (uma letra errada numa palavra curta
+// já é bastante folga; numa palavra longa, um pouco mais). Sem isso, a
+// comparação ficava "ao pé da letra": bastava a voz reconhecer uma
+// palavra um pouco diferente (plural, gíria, ruído) pra ela nunca contar
+// como acerto, mesmo claramente sendo a mesma palavra cantada.
+function palavrasParecidas(a, b) {
+  if (a === b) return true;
+  const tolerancia = Math.max(1, Math.floor(Math.max(a.length, b.length) * 0.3));
+  return distanciaEdicao(a, b) <= tolerancia;
+}
+
 // Compara um trecho reconhecido por voz com o texto esperado de uma linha
-// da cifra. Não usa nenhuma lib de fuzzy-match — só conta quantas das
-// palavras ouvidas aparecem no trecho alvo (cada palavra do alvo só conta
-// uma vez, pra não inflar a pontuação com repetições). Simples, mas
-// suficiente aqui: frases curtas, vocabulário já conhecido de antemão pela
-// letra da própria música.
+// da cifra — cada palavra ouvida procura a palavra mais parecida ainda
+// disponível no alvo (cada uma do alvo só conta uma vez, pra não inflar a
+// pontuação com repetições).
 export function pontuarSemelhancaTexto(reconhecido, alvo) {
   const palavrasOuvidas = normalizarNome(reconhecido).split(" ").filter(Boolean);
   if (palavrasOuvidas.length === 0) return 0;
@@ -21,7 +56,7 @@ export function pontuarSemelhancaTexto(reconhecido, alvo) {
   const disponiveis = normalizarNome(alvo).split(" ").filter(Boolean);
   let acertos = 0;
   for (const palavra of palavrasOuvidas) {
-    const i = disponiveis.indexOf(palavra);
+    const i = disponiveis.findIndex((candidata) => palavrasParecidas(palavra, candidata));
     if (i !== -1) {
       acertos++;
       disponiveis.splice(i, 1);
