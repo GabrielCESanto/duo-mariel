@@ -84,6 +84,22 @@ function transporParteDoAcorde(parte, semitons) {
   return NOTAS[novoIndice] + resto;
 }
 
+// Separa um acorde (ignorando baixo depois de "/") na classe de nota da
+// fundamental (0=C, 1=C#, ... 11=B, mesmo índice de NOTAS) e no restante
+// que descreve a qualidade (ex.: "m7", "sus4") — usado pelo reconhecimento
+// de acorde por áudio (chordDetect.js) pra montar o "template" esperado.
+export function dividirAcorde(acorde) {
+  const raiz = String(acorde ?? "").split("/")[0];
+  const m = raiz.match(/^([A-G])(#|b)?(.*)$/);
+  if (!m) return null;
+  const [, letra, alteracao, resto] = m;
+  const chave = letra + (alteracao ?? "");
+  const notaBase = ENARMONICOS[chave] ?? chave;
+  const indice = NOTAS.indexOf(notaBase);
+  if (indice === -1) return null;
+  return { indice, qualidade: resto };
+}
+
 // "Em7/D" (baixo diferente) precisa transpor as duas partes separadamente
 function transporAcorde(acorde, semitons) {
   return acorde

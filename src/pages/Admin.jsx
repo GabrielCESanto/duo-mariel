@@ -199,6 +199,7 @@ const ABAS_OUTROS = [
   ["musicas", "Músicas"],
   ["ocultar", "Ocultar"],
   ["playlists", "Playlists"],
+  ["teste-acompanhamento", "Acompanhamento (teste)"],
   ["videos", "Vídeos"],
 ];
 
@@ -383,6 +384,15 @@ function Icone({ nome, className = "w-5 h-5" }) {
           <path d="M12 3l2.9 6.5 7.1.7-5.3 4.7 1.5 6.9-6.2-3.7-6.2 3.7 1.5-6.9L2 10.2l7.1-.7z" />
         </svg>
       );
+    case "teste-acompanhamento":
+      return (
+        <svg {...props}>
+          <rect x="9" y="2.5" width="6" height="11" rx="3" />
+          <path d="M5 11a7 7 0 0014 0" />
+          <line x1="12" y1="18" x2="12" y2="21" />
+          <line x1="8.5" y1="21" x2="15.5" y2="21" />
+        </svg>
+      );
     default:
       return null;
   }
@@ -551,8 +561,13 @@ function Painel() {
                   <button
                     key={valor}
                     onClick={() => {
-                      setAba(valor);
                       setMenuOutrosAberto(false);
+                      // Não é uma aba do painel, é uma página própria (rota separada)
+                      if (valor === "teste-acompanhamento") {
+                        navigate("/teste-acompanhamento");
+                        return;
+                      }
+                      setAba(valor);
                     }}
                     className={`w-full text-left px-4 py-2.5 text-sm transition flex items-center gap-2.5 ${
                       valor === "musicas" ? "font-semibold" : ""
@@ -1338,85 +1353,6 @@ function BotaoOuvir({ url, nome, artista }) {
 
 /* ------------------------- CIFRAS ------------------------- */
 
-// Dropdown com caixa de busca pra filtrar a lista de opções — usado pelos
-// filtros de Artista e Estilo (não dá pra digitar-pra-buscar num <select>
-// nativo de forma consistente entre navegadores)
-function SeletorComBusca({ label, opcoes, valor, onMudar }) {
-  const [aberto, setAberto] = useState(false);
-  const [busca, setBusca] = useState("");
-  const ref = useRef(null);
-
-  useEffect(() => {
-    if (!aberto) return;
-    const fecharFora = (e) => {
-      if (ref.current && !ref.current.contains(e.target)) setAberto(false);
-    };
-    document.addEventListener("mousedown", fecharFora);
-    return () => document.removeEventListener("mousedown", fecharFora);
-  }, [aberto]);
-
-  const filtradas = opcoes.filter((o) => normalizarNome(o).includes(normalizarNome(busca)));
-
-  const escolher = (o) => {
-    onMudar(o);
-    setAberto(false);
-    setBusca("");
-  };
-
-  return (
-    <div className="relative flex-1 min-w-0" ref={ref}>
-      <button
-        type="button"
-        onClick={() => setAberto((v) => !v)}
-        className={`input-noir w-full text-left flex items-center justify-between gap-2 ${
-          valor ? "text-cream" : "text-cream-muted"
-        }`}
-      >
-        <span className="truncate">{valor || `Todos os ${label.toLowerCase()}`}</span>
-        <span className="text-cream-muted text-xs shrink-0">▾</span>
-      </button>
-      {aberto && (
-        <div className="absolute z-20 mt-1 w-full rounded-xl border border-noir-700 bg-noir-900 shadow-xl overflow-hidden">
-          <input
-            autoFocus
-            className="input-noir rounded-none border-0 border-b border-noir-700"
-            placeholder={`Buscar ${label.toLowerCase()}...`}
-            value={busca}
-            onChange={(e) => setBusca(e.target.value)}
-          />
-          <ul className="max-h-56 overflow-y-auto">
-            <li>
-              <button
-                type="button"
-                onClick={() => escolher("")}
-                className="w-full text-left px-3 py-2 text-sm text-cream-muted hover:bg-noir-800 transition"
-              >
-                Todos os {label.toLowerCase()}
-              </button>
-            </li>
-            {filtradas.map((o) => (
-              <li key={o}>
-                <button
-                  type="button"
-                  onClick={() => escolher(o)}
-                  className={`w-full text-left px-3 py-2 text-sm truncate transition ${
-                    o === valor ? "text-gold-300 bg-noir-800" : "text-cream hover:bg-noir-800"
-                  }`}
-                >
-                  {o}
-                </button>
-              </li>
-            ))}
-            {filtradas.length === 0 && (
-              <li className="px-3 py-2 text-sm text-cream-muted">Nada encontrado.</li>
-            )}
-          </ul>
-        </div>
-      )}
-    </div>
-  );
-}
-
 // Sorteia `n` itens distintos de uma lista
 function sortearItens(lista, n) {
   const copia = [...lista];
@@ -1431,8 +1367,6 @@ function AbaCifras() {
   const [musicas, setMusicas] = useState([]);
   const [carregando, setCarregando] = useState(true);
   const [filtro, setFiltro] = useState("");
-  const [filtroArtista, setFiltroArtista] = useState("");
-  const [filtroEstilo, setFiltroEstilo] = useState("");
   const [aleatorias, setAleatorias] = useState([]);
   const [progresso, setProgresso] = useState(() => estadoDownloadCifras());
   const [modalAberto, setModalAberto] = useState(false);
@@ -1478,22 +1412,11 @@ function AbaCifras() {
   // remontar (o estado vive fora do componente, em src/lib/cifraCache.js)
   useEffect(() => assinarDownloadCifras(setProgresso), []);
 
-  const artistas = useMemo(
-    () => [...new Set(musicas.map((m) => m.artista).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
-    [musicas]
-  );
-  const estilos = useMemo(
-    () => [...new Set(musicas.map((m) => m.estilo).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
-    [musicas]
-  );
-
   const visiveis = musicas.filter((m) => {
     if (soFavoritas && !m.favorito) return false;
-    if (filtroArtista && m.artista !== filtroArtista) return false;
-    if (filtroEstilo && m.estilo !== filtroEstilo) return false;
-    const q = filtro.trim().toLowerCase();
+    const q = normalizarNome(filtro);
     if (!q) return true;
-    return `${m.nome} ${m.artista} ${m.estilo ?? ""}`.toLowerCase().includes(q);
+    return normalizarNome(`${m.nome} ${m.artista} ${m.estilo ?? ""}`).includes(q);
   });
 
   const cliqueBaixar = () => {
@@ -1544,7 +1467,7 @@ function AbaCifras() {
       <div className="flex gap-2 mb-2">
         <input
           className="input-noir"
-          placeholder="Buscar cifra..."
+          placeholder="Buscar por nome, artista ou estilo..."
           value={filtro}
           onChange={(e) => setFiltro(e.target.value)}
         />
@@ -1559,11 +1482,6 @@ function AbaCifras() {
         >
           {soFavoritas ? "★" : "☆"}
         </button>
-      </div>
-
-      <div className="flex gap-2 mb-3 flex-col sm:flex-row">
-        <SeletorComBusca label="Artistas" opcoes={artistas} valor={filtroArtista} onMudar={setFiltroArtista} />
-        <SeletorComBusca label="Estilos" opcoes={estilos} valor={filtroEstilo} onMudar={setFiltroEstilo} />
       </div>
 
       {carregando ? (

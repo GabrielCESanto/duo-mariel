@@ -5,6 +5,7 @@ import "./index.css";
 import Home from "./pages/Home.jsx";
 import Admin from "./pages/Admin.jsx";
 import Especial from "./pages/Especial.jsx";
+import TesteAcompanhamento from "./pages/TesteAcompanhamento.jsx";
 import ErrorBoundary from "./components/ErrorBoundary.jsx";
 import { iniciarAnalytics } from "./lib/analytics.js";
 
@@ -35,6 +36,8 @@ ReactDOM.createRoot(document.getElementById("root")).render(
           <Route path="/" element={<Home />} />
           <Route path="/admin" element={<Admin />} />
           <Route path="/especial" element={<Especial />} />
+          <Route path="/teste-acompanhamento" element={<TesteAcompanhamento />} />
+          <Route path="/teste-acompanhamento/:id" element={<TesteAcompanhamento />} />
           <Route
             path="/cifra/:id"
             element={
