@@ -101,56 +101,52 @@ export function similaridadeChroma(chroma, template) {
   return soma;
 }
 
-// Texto cantado a partir de um ponto (bloco/segmento) até o fim da linha —
-// e, se sobrar pouca coisa (linha curta, comum em cifra que quebra a
-// letra em versos pequenos), complementa com a linha seguinte. Serve de
-// contexto pro casamento por voz: precisa de umas 3+ palavras pra comparar
-// com alguma confiança.
-function letraAPartirDe(blocos, blocoIndex, segIndex) {
-  const bloco = blocos[blocoIndex];
-  let texto = bloco.segmentos
-    .slice(segIndex)
-    .map((s) => s.texto)
-    .join("")
-    .trim();
-
-  if (texto.split(/\s+/).filter(Boolean).length < 3) {
-    const proximo = blocos[blocoIndex + 1];
-    if (proximo?.tipo === "linha") {
-      const textoProximo = proximo.segmentos.map((s) => s.texto).join("").trim();
-      texto = `${texto} ${textoProximo}`.trim();
-    }
-  }
-  return texto;
-}
-
 // A partir dos `blocos` do .cho (parseChordPro), monta a lista, em ordem,
-// de "passagens": cada ocorrência explícita de um acorde [Entre colchetes]
-// no texto, com a referência de onde ela fica (pra rolar a tela até lá) e
-// a letra que vem logo depois (usada pro casamento por voz, que resolve
-// em qual repetição de um acorde repetido o músico está — o áudio sozinho
-// não consegue, porque o mesmo acorde soa igual em qualquer verso).
-// Entre um token de acorde e o próximo, o acorde "em vigor" continua sendo
-// o último marcado — é assim que cifra em texto normalmente indica "seguiu
-// tocando o mesmo acorde" sem precisar repetir o símbolo em toda palavra.
-export function construirPassagensDeAcorde(blocos) {
-  const passagens = [];
+// de "frases": uma por linha de letra, com o acorde em vigor naquele
+// ponto (o último marcado até ali — cifra em texto normalmente indica
+// "segue tocando o mesmo acorde" sem repetir o símbolo em toda linha) e
+// a referência de onde a linha fica (pra rolar a tela até lá).
+//
+// É a unidade usada pro casamento por voz: comparar o que está sendo
+// cantado com a letra de cada frase, numa janela pequena das próximas
+// frases, resolve em qual repetição de uma linha/acorde o músico está —
+// o acorde sozinho não consegue, porque o mesmo acorde (ou até a mesma
+// linha) pode se repetir em vários versos.
+export function construirFrases(blocos) {
+  const frases = [];
   let acordeAtual = null;
 
   blocos.forEach((bloco, blocoIndex) => {
     if (bloco.tipo !== "linha") return;
-    bloco.segmentos.forEach((seg, segIndex) => {
-      if (seg.chord) {
-        acordeAtual = seg.chord;
-        passagens.push({
-          chord: acordeAtual,
-          blocoIndex,
-          segIndex,
-          letra: letraAPartirDe(blocos, blocoIndex, segIndex),
-        });
-      }
-    });
+    for (const seg of bloco.segmentos) {
+      if (seg.chord) acordeAtual = seg.chord;
+    }
+    const texto = bloco.segmentos.map((s) => s.texto).join("").trim();
+    frases.push({ blocoIndex, texto, chord: acordeAtual });
   });
 
-  return passagens;
+  // Linhas curtas (poucas palavras, comum em cifra que quebra a letra em
+  // versos pequenos) não dão contexto suficiente pro casamento por voz —
+  // complementa com a linha seguinte só pra fins de comparação; o texto
+  // exibido na tela continua sendo só o da própria linha.
+  frases.forEach((frase, i) => {
+    const nPalavras = frase.texto.split(/\s+/).filter(Boolean).length;
+    frase.contextoTexto =
+      nPalavras < 3 && frases[i + 1] ? `${frase.texto} ${frases[i + 1].texto}`.trim() : frase.texto;
+  });
+
+  return frases;
+}
+
+// A primeira frase, a partir de `indiceAtual` (exclusive), em que o
+// acorde em vigor é diferente do atual — usado pelo reconhecimento por
+// áudio (secundário/opcional) pra saber pra onde pular quando detecta uma
+// troca de acorde real, em vez de avançar uma frase de cada vez mesmo
+// quando várias seguidas compartilham o mesmo acorde.
+export function proximaFraseComAcordeDiferente(frases, indiceAtual) {
+  const acordeAtual = frases[indiceAtual]?.chord;
+  for (let i = indiceAtual + 1; i < frases.length; i++) {
+    if (frases[i].chord !== acordeAtual) return i;
+  }
+  return -1;
 }

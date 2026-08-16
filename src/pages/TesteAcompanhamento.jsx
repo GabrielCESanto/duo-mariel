@@ -8,19 +8,16 @@ import { useAcompanhamentoPorAcorde } from "../hooks/useAcompanhamentoPorAcorde"
 const BASE = import.meta.env.BASE_URL;
 
 // Protótipo experimental: acompanhamento de cifra "por ouvido" — escuta o
-// microfone, reconhece o acorde tocado e rola a tela sozinha, comparando
-// só com o acorde atual/próximo esperado da música (não com todos os
-// acordes possíveis). Não está linkada em nenhum menu — acesse direto por
+// microfone e rola a tela sozinha, sem scroll manual nem velocidade fixa.
+// Acessível pelo Menu do admin ("Acompanhamento (teste)") ou direto por
 // /#/teste-acompanhamento (ou /#/teste-acompanhamento/<id da música>).
 //
-// Limitação conhecida (a mesma discutida antes de começar a construir
-// isso): quando o mesmo acorde se repete em pontos diferentes da letra
-// (ex.: "Sol" no verso 1 e de novo no verso 2), o áudio sozinho não sabe
-// dizer em qual repetição você está — só o acorde muda de posição quando
-// o PRÓXIMO acorde da sequência é diferente do atual. Combinar com
-// reconhecimento de voz (Web Speech API) resolveria isso, mas fica pra
-// uma iteração seguinte, depois de validar que a detecção por acorde já
-// funciona bem sozinha.
+// O sinal principal é a VOZ (o que está sendo cantado, casado com a letra
+// das próximas linhas) — reconhecer o acorde tocado por áudio, sozinho,
+// exigiu calibração manual e ainda assim é bem mais impreciso (testado:
+// ~35-40% de semelhança até acertando). O acorde continua disponível como
+// reforço opcional (útil em trecho instrumental, sem letra pra comparar),
+// mas começa desligado.
 export default function TesteAcompanhamento() {
   const { id } = useParams();
 
@@ -28,17 +25,23 @@ export default function TesteAcompanhamento() {
     <div className="min-h-screen">
       <div className="max-w-2xl mx-auto px-5 py-8">
         <header className="flex items-center gap-3 mb-6">
-          <Link to="/" className="flex items-center gap-3 group">
+          <Link to="/" className="flex items-center gap-3 group shrink-0">
             <img
               src={`${BASE}img/logo-circle.png`}
               alt="Duo Mariel"
               className="w-10 h-10 rounded-full border border-noir-700 group-hover:border-gold-500 transition"
             />
           </Link>
-          <div>
+          <div className="min-w-0 flex-1">
             <span className="section-title text-sm block">Acompanhamento por acorde</span>
             <span className="text-cream-muted text-xs">protótipo experimental — só escuta, não grava nem envia áudio</span>
           </div>
+          <Link
+            to="/admin"
+            className="shrink-0 px-3 py-1.5 rounded-lg border border-noir-700 text-xs text-cream-muted hover:text-gold-300 hover:border-gold-600 transition"
+          >
+            ‹ Menu
+          </Link>
         </header>
 
         {id ? <Viewer id={id} /> : <Selecionar />}
@@ -122,10 +125,11 @@ function Viewer({ id }) {
   );
 
   const [usarVoz, setUsarVoz] = useState(true);
+  const [usarAcorde, setUsarAcorde] = useState(false);
 
   const {
-    passagens,
-    passagemAtual,
+    frases,
+    fraseAtual,
     ouvindo,
     similaridade,
     textoOuvido,
@@ -135,7 +139,7 @@ function Viewer({ id }) {
     parar,
     avancarManual,
     voltarManual,
-  } = useAcompanhamentoPorAcorde(blocos, { usarVoz });
+  } = useAcompanhamentoPorAcorde(blocos, { usarVoz, usarAcorde });
 
   if (musica === undefined) return <p className="text-cream-muted text-center py-10">Carregando...</p>;
   if (musica === null || !musica.cifra_cho) {
@@ -184,29 +188,44 @@ function Viewer({ id }) {
             ▶
           </button>
           <span className="text-cream-muted text-xs">
-            {passagens.length === 0
-              ? "sem acordes marcados nessa cifra"
-              : `passagem ${Math.min(passagens.indexOf(passagemAtual) + 1, passagens.length)}/${passagens.length}`}
+            {frases.length === 0
+              ? "sem letra nessa cifra"
+              : `linha ${Math.min(frases.indexOf(fraseAtual) + 1, frases.length)}/${frases.length}`}
           </span>
         </div>
 
-        <label
-          className={`mt-3 flex items-center gap-2 text-xs ${
-            ouvindo ? "text-cream-muted/50" : "text-cream-muted cursor-pointer"
-          }`}
-        >
-          <input
-            type="checkbox"
-            checked={usarVoz}
-            disabled={ouvindo}
-            onChange={(e) => setUsarVoz(e.target.checked)}
-          />
-          Combinar com reconhecimento de voz (resolve acorde repetido em versos diferentes)
-        </label>
+        <div className="mt-3 flex flex-col gap-1.5">
+          <label
+            className={`flex items-center gap-2 text-xs ${
+              ouvindo ? "text-cream-muted/50" : "text-cream-muted cursor-pointer"
+            }`}
+          >
+            <input
+              type="checkbox"
+              checked={usarVoz}
+              disabled={ouvindo}
+              onChange={(e) => setUsarVoz(e.target.checked)}
+            />
+            Acompanhar por voz (sinal principal — compara o que você canta com a letra)
+          </label>
+          <label
+            className={`flex items-center gap-2 text-xs ${
+              ouvindo ? "text-cream-muted/50" : "text-cream-muted cursor-pointer"
+            }`}
+          >
+            <input
+              type="checkbox"
+              checked={usarAcorde}
+              disabled={ouvindo}
+              onChange={(e) => setUsarAcorde(e.target.checked)}
+            />
+            Reforçar com detecção de acorde (experimental, mais impreciso)
+          </label>
+        </div>
         {usarVoz && !vozSuportada && (
           <p className="text-amber-400/80 text-xs mt-1">
             ⚠️ Esse navegador não tem reconhecimento de voz (Web Speech API) — funciona no
-            Chrome/Edge, não no Firefox. Vai acompanhar só pelo acorde mesmo.
+            Chrome/Edge, não no Firefox.
           </p>
         )}
 
@@ -214,16 +233,20 @@ function Viewer({ id }) {
 
         {ouvindo && (
           <div className="mt-3">
-            <p className="text-cream-muted text-xs mb-1">
-              esperando <span className="text-gold-300">{passagemAtual?.chord}</span> — semelhança{" "}
-              {Math.round(similaridade * 100)}%
-            </p>
-            <div className="h-1.5 rounded-full bg-noir-800 overflow-hidden">
-              <div
-                className="h-full bg-gold-500 transition-all"
-                style={{ width: `${Math.min(100, Math.round(similaridade * 100))}%` }}
-              />
-            </div>
+            {usarAcorde && (
+              <>
+                <p className="text-cream-muted text-xs mb-1">
+                  esperando <span className="text-gold-300">{fraseAtual?.chord}</span> — semelhança{" "}
+                  {Math.round(similaridade * 100)}%
+                </p>
+                <div className="h-1.5 rounded-full bg-noir-800 overflow-hidden">
+                  <div
+                    className="h-full bg-gold-500 transition-all"
+                    style={{ width: `${Math.min(100, Math.round(similaridade * 100))}%` }}
+                  />
+                </div>
+              </>
+            )}
             {usarVoz && vozSuportada && (
               <p className="text-cream-muted/70 text-xs mt-2 truncate">
                 🎙️ ouvindo: <span className="italic">{textoOuvido || "..."}</span>
@@ -233,21 +256,21 @@ function Viewer({ id }) {
         )}
       </div>
 
-      <CifraChoAcompanhada blocos={blocos} passagemAtual={passagemAtual} />
+      <CifraChoAcompanhada blocos={blocos} fraseAtual={fraseAtual} />
     </div>
   );
 }
 
-function CifraChoAcompanhada({ blocos, passagemAtual }) {
+function CifraChoAcompanhada({ blocos, fraseAtual }) {
   const refsLinha = useRef({});
 
   useEffect(() => {
-    if (!passagemAtual) return;
-    refsLinha.current[passagemAtual.blocoIndex]?.scrollIntoView({
+    if (!fraseAtual) return;
+    refsLinha.current[fraseAtual.blocoIndex]?.scrollIntoView({
       behavior: "smooth",
       block: "center",
     });
-  }, [passagemAtual]);
+  }, [fraseAtual]);
 
   return (
     <div className="pb-10 text-cream">
@@ -267,7 +290,7 @@ function CifraChoAcompanhada({ blocos, passagemAtual }) {
             </h3>
           );
         }
-        const ativa = passagemAtual?.blocoIndex === i;
+        const ativa = fraseAtual?.blocoIndex === i;
         return (
           <div
             key={i}
@@ -280,11 +303,7 @@ function CifraChoAcompanhada({ blocos, passagemAtual }) {
           >
             {b.segmentos.map((seg, j) => (
               <span key={j} className="inline-flex flex-col items-start max-w-full min-w-0">
-                <span
-                  className={`font-semibold leading-none text-[0.85em] h-[1.3em] select-none ${
-                    ativa && j === passagemAtual.segIndex ? "text-gold-200" : "text-gold-400"
-                  }`}
-                >
+                <span className="font-semibold leading-none text-[0.85em] h-[1.3em] select-none text-gold-400">
                   {seg.chord || " "}
                 </span>
                 <span className="whitespace-pre-wrap break-words leading-snug">{seg.texto || " "}</span>

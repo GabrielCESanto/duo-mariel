@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  construirPassagensDeAcorde,
+  construirFrases,
   extrairChroma,
   gerarTemplateAcorde,
+  proximaFraseComAcordeDiferente,
   similaridadeChroma,
 } from "../lib/chordDetect";
 import {
@@ -11,43 +12,48 @@ import {
   reconhecimentoDeVozSuportado,
 } from "../lib/reconhecimentoVoz";
 
-// Só avança quando o próximo acorde bate MELHOR que o atual por essa
-// margem — evita trocar de linha por causa de ruído/harmônico parecido.
-const MARGEM_AVANCO = 0.1;
+// Só pula pra uma frase quando o texto ouvido bater pelo menos essa
+// fração das palavras com o texto dela.
+const LIMIAR_VOZ = 0.5;
+// Só olha as próximas N frases a partir da atual — testado com uma busca
+// bem mais ampla (25 frases à frente) e ficou pior: matches por
+// coincidência lá na frente, e mais lento pra recalcular a cada frase
+// ouvida. Uma janela pequena (a próxima linha, e mais umas 2-4 depois)
+// já cobre o caso real (pular uma repetição perdida) sem esse ruído.
+const JANELA_VOZ = 5;
+
+// Só avança por acorde quando o próximo bate MELHOR que o atual por essa
+// margem — evita trocar de linha por ruído/harmônico parecido.
+const MARGEM_ACORDE = 0.1;
 // E só depois de bater assim por esse tempo seguido — evita disparo em
 // falso durante a troca de dedo/mão de um acorde pro outro.
-const TEMPO_ESTAVEL_MS = 220;
-// Abaixo disso, a semelhança é baixa demais pra confiar (silêncio, corda
-// solta, ruído). Calibrado com teste real: comparar áudio de instrumento
-// contra um "molde" puro de acorde raramente passa de ~40-50% mesmo
-// acertando (o molde é um sinal idealizado, o instrumento tem harmônicos
-// que o molde não prevê) — nos testes, acorde certo ficou em 35-40%,
-// errado em ~15%. 0,5 como mínimo travava a rolagem inteira, mesmo
-// acertando o acorde; 0,25 fica confortavelmente entre os dois patamares
-// observados.
-const SIMILARIDADE_MINIMA = 0.25;
+const TEMPO_ESTAVEL_ACORDE_MS = 220;
+// Abaixo disso, a semelhança é baixa demais pra confiar. Calibrado com
+// teste real: comparar áudio de instrumento contra um "molde" puro de
+// acorde raramente passa de ~40-50% mesmo acertando — nos testes, acorde
+// certo ficou em 35-40%, errado em ~15%.
+const SIMILARIDADE_MINIMA_ACORDE = 0.25;
 
-// Só pula pra frente por causa da voz quando a frase batida tiver pelo
-// menos essa fração das palavras ouvidas reconhecidas na linha alvo.
-const LIMIAR_VOZ = 0.5;
-// Até quantas passagens à frente da atual a voz pode procurar — limita
-// tanto o custo (comparar contra a cifra inteira a cada frase ouvida)
-// quanto o risco de uma frase parecida lá na frente disparar um salto
-// longe demais por coincidência.
-const LOOKAHEAD_VOZ = 25;
-
-// Escuta o microfone e acompanha, sozinho, em qual ponto da cifra o
-// músico está tocando/cantando agora — pra rolar a tela sem precisar de
-// scroll manual nem de velocidade fixa. Combina dois sinais:
-// - Acorde (sempre ativo): compara o som com o acorde atual/próximo
-//   esperado — ótimo pra saber O QUANDO trocar de linha.
-// - Voz (opcional, se o navegador suportar): compara o que está sendo
-//   cantado com a letra de cada trecho — resolve O ONDE, em especial
-//   quando o mesmo acorde se repete em vários versos (aí o áudio sozinho
-//   não sabe dizer em qual repetição você está).
+// Escuta o microfone e acompanha, sozinho, em qual linha da cifra o
+// músico está cantando agora — pra rolar a tela sem precisar de scroll
+// manual nem de velocidade fixa.
+//
+// O sinal principal é a VOZ: compara o que está sendo cantado com a letra
+// das próximas frases (janela pequena, sempre "pronta" a partir da
+// posição atual) e segue a que bater. É mais direto que tentar reconhecer
+// o acorde tocado — decidir "qual das próximas linhas é essa" a partir do
+// que foi dito é mais barato e mais confiável do que casar o timbre real
+// de um instrumento contra um molde matemático de acorde.
+//
+// O ACORDE (opcional, `usarAcorde`) fica como reforço: útil só quando não
+// tem letra pra comparar (trecho instrumental) ou o navegador não suporta
+// reconhecimento de voz — mas nos testes reais precisou de calibração
+// manual e ainda assim é o sinal mais fraco dos dois, por isso começa
+// desligado.
+//
 // `blocos` é o retorno de parseChordPro().
-export function useAcompanhamentoPorAcorde(blocos, { usarVoz = true } = {}) {
-  const passagens = useMemo(() => construirPassagensDeAcorde(blocos), [blocos]);
+export function useAcompanhamentoPorAcorde(blocos, { usarVoz = true, usarAcorde = false } = {}) {
+  const frases = useMemo(() => construirFrases(blocos), [blocos]);
 
   const [indice, setIndice] = useState(0);
   const [ouvindo, setOuvindo] = useState(false);
@@ -67,53 +73,26 @@ export function useAcompanhamentoPorAcorde(blocos, { usarVoz = true } = {}) {
   useEffect(() => {
     indiceRef.current = 0;
     setIndice(0);
-  }, [passagens]);
+  }, [frases]);
 
   const mudarIndice = (novo) => {
-    const limitado = Math.max(0, Math.min(novo, passagens.length - 1));
+    const limitado = Math.max(0, Math.min(novo, frases.length - 1));
     indiceRef.current = limitado;
     setIndice(limitado);
   };
 
-  const laco = () => {
-    const analyser = analyserRef.current;
-    const ctx = contextoRef.current;
-    if (!analyser || !ctx) return;
-
-    const chroma = extrairChroma(analyser, ctx.sampleRate);
-    const atual = passagens[indiceRef.current];
-    const proxima = passagens[indiceRef.current + 1];
-    const simAtual = similaridadeChroma(chroma, gerarTemplateAcorde(atual?.chord));
-    const simProxima = proxima ? similaridadeChroma(chroma, gerarTemplateAcorde(proxima.chord)) : -1;
-    setSimilaridade(simAtual);
-
-    const bateMelhorQueAtual = simProxima > simAtual + MARGEM_AVANCO && simProxima > SIMILARIDADE_MINIMA;
-    const agora = performance.now();
-    if (bateMelhorQueAtual) {
-      if (!estavelDesdeRef.current) estavelDesdeRef.current = agora;
-      if (agora - estavelDesdeRef.current > TEMPO_ESTAVEL_MS) {
-        mudarIndice(indiceRef.current + 1);
-        estavelDesdeRef.current = 0;
-      }
-    } else {
-      estavelDesdeRef.current = 0;
-    }
-
-    rafRef.current = requestAnimationFrame(laco);
-  };
-
-  // A cada frase (parcial ou final) reconhecida, procura à frente da
-  // posição atual qual passagem tem a letra mais parecida com o que foi
-  // ouvido. Só pula pra frente (nunca volta) — uma palavra mal reconhecida
-  // batendo por acaso com um trecho anterior não deve fazer a tela voltar.
+  // A cada frase (parcial ou final) reconhecida, procura na janela das
+  // próximas frases qual texto bate melhor com o que foi ouvido. Só pula
+  // pra frente (nunca volta) — uma palavra mal reconhecida batendo por
+  // acaso com um trecho anterior não deve fazer a tela voltar.
   const avaliarVoz = (texto) => {
     const inicio = indiceRef.current;
-    const fim = Math.min(passagens.length, inicio + LOOKAHEAD_VOZ);
+    const fim = Math.min(frases.length, inicio + JANELA_VOZ);
     let melhorIndice = -1;
     let melhorPontuacao = LIMIAR_VOZ;
 
     for (let i = inicio; i < fim; i++) {
-      const pontuacao = pontuarSemelhancaTexto(texto, passagens[i].letra);
+      const pontuacao = pontuarSemelhancaTexto(texto, frases[i].contextoTexto);
       if (pontuacao > melhorPontuacao) {
         melhorPontuacao = pontuacao;
         melhorIndice = i;
@@ -123,28 +102,64 @@ export function useAcompanhamentoPorAcorde(blocos, { usarVoz = true } = {}) {
     if (melhorIndice > indiceRef.current) mudarIndice(melhorIndice);
   };
 
+  const lacoAcorde = () => {
+    const analyser = analyserRef.current;
+    const ctx = contextoRef.current;
+    if (!analyser || !ctx) return;
+
+    const chroma = extrairChroma(analyser, ctx.sampleRate);
+    const atual = frases[indiceRef.current];
+    const proximoIndice = proximaFraseComAcordeDiferente(frases, indiceRef.current);
+    const proxima = proximoIndice !== -1 ? frases[proximoIndice] : null;
+    const simAtual = similaridadeChroma(chroma, gerarTemplateAcorde(atual?.chord));
+    const simProxima = proxima ? similaridadeChroma(chroma, gerarTemplateAcorde(proxima.chord)) : -1;
+    setSimilaridade(simAtual);
+
+    const bateMelhorQueAtual =
+      simProxima > simAtual + MARGEM_ACORDE && simProxima > SIMILARIDADE_MINIMA_ACORDE;
+    const agora = performance.now();
+    if (bateMelhorQueAtual) {
+      if (!estavelDesdeRef.current) estavelDesdeRef.current = agora;
+      if (agora - estavelDesdeRef.current > TEMPO_ESTAVEL_ACORDE_MS) {
+        mudarIndice(proximoIndice);
+        estavelDesdeRef.current = 0;
+      }
+    } else {
+      estavelDesdeRef.current = 0;
+    }
+
+    rafRef.current = requestAnimationFrame(lacoAcorde);
+  };
+
   const iniciar = async () => {
-    if (passagens.length === 0) {
-      setErro("Essa cifra não tem acordes marcados pra acompanhar.");
+    if (frases.length === 0) {
+      setErro("Essa cifra não tem letra pra acompanhar.");
       return;
     }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
-      });
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      const fonte = ctx.createMediaStreamSource(stream);
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 4096;
-      analyser.smoothingTimeConstant = 0.4;
-      fonte.connect(analyser);
+    if (!usarVoz && !usarAcorde) {
+      setErro("Ative pelo menos um sinal (voz ou acorde) pra acompanhar.");
+      return;
+    }
 
-      streamRef.current = stream;
-      contextoRef.current = ctx;
-      analyserRef.current = analyser;
+    try {
       setErro(null);
-      setOuvindo(true);
-      rafRef.current = requestAnimationFrame(laco);
+
+      if (usarAcorde) {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+        });
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const fonte = ctx.createMediaStreamSource(stream);
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 4096;
+        analyser.smoothingTimeConstant = 0.4;
+        fonte.connect(analyser);
+
+        streamRef.current = stream;
+        contextoRef.current = ctx;
+        analyserRef.current = analyser;
+        rafRef.current = requestAnimationFrame(lacoAcorde);
+      }
 
       if (usarVoz && reconhecimentoDeVozSuportado) {
         vozRef.current = criarReconhecedorDeVoz({
@@ -156,6 +171,8 @@ export function useAcompanhamentoPorAcorde(blocos, { usarVoz = true } = {}) {
         });
         vozRef.current?.iniciar();
       }
+
+      setOuvindo(true);
     } catch {
       setErro("Não deu pra acessar o microfone — verifique a permissão do navegador.");
     }
@@ -180,9 +197,9 @@ export function useAcompanhamentoPorAcorde(blocos, { usarVoz = true } = {}) {
   useEffect(() => () => parar(), []);
 
   return {
-    passagens,
+    frases,
     indice,
-    passagemAtual: passagens[indice] ?? null,
+    fraseAtual: frases[indice] ?? null,
     ouvindo,
     similaridade,
     textoOuvido,
