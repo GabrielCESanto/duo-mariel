@@ -5,26 +5,54 @@ import {
   gerarTemplateAcorde,
   similaridadeChroma,
 } from "../lib/chordDetect";
+import {
+  criarReconhecedorDeVoz,
+  pontuarSemelhancaTexto,
+  reconhecimentoDeVozSuportado,
+} from "../lib/reconhecimentoVoz";
 
 // Só avança quando o próximo acorde bate MELHOR que o atual por essa
 // margem — evita trocar de linha por causa de ruído/harmônico parecido.
-const MARGEM_AVANCO = 0.12;
+const MARGEM_AVANCO = 0.1;
 // E só depois de bater assim por esse tempo seguido — evita disparo em
 // falso durante a troca de dedo/mão de um acorde pro outro.
 const TEMPO_ESTAVEL_MS = 220;
 // Abaixo disso, a semelhança é baixa demais pra confiar (silêncio, corda
-// solta, ruído) — mesmo que seja "a melhor opção entre as duas".
-const SIMILARIDADE_MINIMA = 0.5;
+// solta, ruído). Calibrado com teste real: comparar áudio de instrumento
+// contra um "molde" puro de acorde raramente passa de ~40-50% mesmo
+// acertando (o molde é um sinal idealizado, o instrumento tem harmônicos
+// que o molde não prevê) — nos testes, acorde certo ficou em 35-40%,
+// errado em ~15%. 0,5 como mínimo travava a rolagem inteira, mesmo
+// acertando o acorde; 0,25 fica confortavelmente entre os dois patamares
+// observados.
+const SIMILARIDADE_MINIMA = 0.25;
 
-// Escuta o microfone e acompanha, sozinho, em qual acorde da cifra o
-// músico está tocando agora — pra rolar a tela sem precisar de scroll
-// manual nem de velocidade fixa. `blocos` é o retorno de parseChordPro().
-export function useAcompanhamentoPorAcorde(blocos) {
+// Só pula pra frente por causa da voz quando a frase batida tiver pelo
+// menos essa fração das palavras ouvidas reconhecidas na linha alvo.
+const LIMIAR_VOZ = 0.5;
+// Até quantas passagens à frente da atual a voz pode procurar — limita
+// tanto o custo (comparar contra a cifra inteira a cada frase ouvida)
+// quanto o risco de uma frase parecida lá na frente disparar um salto
+// longe demais por coincidência.
+const LOOKAHEAD_VOZ = 25;
+
+// Escuta o microfone e acompanha, sozinho, em qual ponto da cifra o
+// músico está tocando/cantando agora — pra rolar a tela sem precisar de
+// scroll manual nem de velocidade fixa. Combina dois sinais:
+// - Acorde (sempre ativo): compara o som com o acorde atual/próximo
+//   esperado — ótimo pra saber O QUANDO trocar de linha.
+// - Voz (opcional, se o navegador suportar): compara o que está sendo
+//   cantado com a letra de cada trecho — resolve O ONDE, em especial
+//   quando o mesmo acorde se repete em vários versos (aí o áudio sozinho
+//   não sabe dizer em qual repetição você está).
+// `blocos` é o retorno de parseChordPro().
+export function useAcompanhamentoPorAcorde(blocos, { usarVoz = true } = {}) {
   const passagens = useMemo(() => construirPassagensDeAcorde(blocos), [blocos]);
 
   const [indice, setIndice] = useState(0);
   const [ouvindo, setOuvindo] = useState(false);
   const [similaridade, setSimilaridade] = useState(0);
+  const [textoOuvido, setTextoOuvido] = useState("");
   const [erro, setErro] = useState(null);
 
   const indiceRef = useRef(0);
@@ -33,6 +61,7 @@ export function useAcompanhamentoPorAcorde(blocos) {
   const streamRef = useRef(null);
   const rafRef = useRef(null);
   const estavelDesdeRef = useRef(0);
+  const vozRef = useRef(null);
 
   // Muda de música (ou a cifra foi editada) — recomeça do início
   useEffect(() => {
@@ -73,6 +102,27 @@ export function useAcompanhamentoPorAcorde(blocos) {
     rafRef.current = requestAnimationFrame(laco);
   };
 
+  // A cada frase (parcial ou final) reconhecida, procura à frente da
+  // posição atual qual passagem tem a letra mais parecida com o que foi
+  // ouvido. Só pula pra frente (nunca volta) — uma palavra mal reconhecida
+  // batendo por acaso com um trecho anterior não deve fazer a tela voltar.
+  const avaliarVoz = (texto) => {
+    const inicio = indiceRef.current;
+    const fim = Math.min(passagens.length, inicio + LOOKAHEAD_VOZ);
+    let melhorIndice = -1;
+    let melhorPontuacao = LIMIAR_VOZ;
+
+    for (let i = inicio; i < fim; i++) {
+      const pontuacao = pontuarSemelhancaTexto(texto, passagens[i].letra);
+      if (pontuacao > melhorPontuacao) {
+        melhorPontuacao = pontuacao;
+        melhorIndice = i;
+      }
+    }
+
+    if (melhorIndice > indiceRef.current) mudarIndice(melhorIndice);
+  };
+
   const iniciar = async () => {
     if (passagens.length === 0) {
       setErro("Essa cifra não tem acordes marcados pra acompanhar.");
@@ -95,6 +145,17 @@ export function useAcompanhamentoPorAcorde(blocos) {
       setErro(null);
       setOuvindo(true);
       rafRef.current = requestAnimationFrame(laco);
+
+      if (usarVoz && reconhecimentoDeVozSuportado) {
+        vozRef.current = criarReconhecedorDeVoz({
+          onTexto: (texto) => {
+            setTextoOuvido(texto);
+            avaliarVoz(texto);
+          },
+          onErro: (codigo) => console.warn("Reconhecimento de voz:", codigo),
+        });
+        vozRef.current?.iniciar();
+      }
     } catch {
       setErro("Não deu pra acessar o microfone — verifique a permissão do navegador.");
     }
@@ -108,10 +169,14 @@ export function useAcompanhamentoPorAcorde(blocos) {
     contextoRef.current?.close();
     contextoRef.current = null;
     analyserRef.current = null;
+    vozRef.current?.parar();
+    vozRef.current = null;
+    setTextoOuvido("");
     setOuvindo(false);
   };
 
-  // Solta o microfone se o usuário sair da tela sem clicar em "Parar"
+  // Solta o microfone (e a escuta de voz) se o usuário sair da tela sem
+  // clicar em "Parar"
   useEffect(() => () => parar(), []);
 
   return {
@@ -120,6 +185,8 @@ export function useAcompanhamentoPorAcorde(blocos) {
     passagemAtual: passagens[indice] ?? null,
     ouvindo,
     similaridade,
+    textoOuvido,
+    vozSuportada: reconhecimentoDeVozSuportado,
     erro,
     iniciar,
     parar,

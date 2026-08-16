@@ -101,9 +101,35 @@ export function similaridadeChroma(chroma, template) {
   return soma;
 }
 
+// Texto cantado a partir de um ponto (bloco/segmento) até o fim da linha —
+// e, se sobrar pouca coisa (linha curta, comum em cifra que quebra a
+// letra em versos pequenos), complementa com a linha seguinte. Serve de
+// contexto pro casamento por voz: precisa de umas 3+ palavras pra comparar
+// com alguma confiança.
+function letraAPartirDe(blocos, blocoIndex, segIndex) {
+  const bloco = blocos[blocoIndex];
+  let texto = bloco.segmentos
+    .slice(segIndex)
+    .map((s) => s.texto)
+    .join("")
+    .trim();
+
+  if (texto.split(/\s+/).filter(Boolean).length < 3) {
+    const proximo = blocos[blocoIndex + 1];
+    if (proximo?.tipo === "linha") {
+      const textoProximo = proximo.segmentos.map((s) => s.texto).join("").trim();
+      texto = `${texto} ${textoProximo}`.trim();
+    }
+  }
+  return texto;
+}
+
 // A partir dos `blocos` do .cho (parseChordPro), monta a lista, em ordem,
 // de "passagens": cada ocorrência explícita de um acorde [Entre colchetes]
-// no texto, com a referência de onde ela fica (pra rolar a tela até lá).
+// no texto, com a referência de onde ela fica (pra rolar a tela até lá) e
+// a letra que vem logo depois (usada pro casamento por voz, que resolve
+// em qual repetição de um acorde repetido o músico está — o áudio sozinho
+// não consegue, porque o mesmo acorde soa igual em qualquer verso).
 // Entre um token de acorde e o próximo, o acorde "em vigor" continua sendo
 // o último marcado — é assim que cifra em texto normalmente indica "seguiu
 // tocando o mesmo acorde" sem precisar repetir o símbolo em toda palavra.
@@ -116,7 +142,12 @@ export function construirPassagensDeAcorde(blocos) {
     bloco.segmentos.forEach((seg, segIndex) => {
       if (seg.chord) {
         acordeAtual = seg.chord;
-        passagens.push({ chord: acordeAtual, blocoIndex, segIndex });
+        passagens.push({
+          chord: acordeAtual,
+          blocoIndex,
+          segIndex,
+          letra: letraAPartirDe(blocos, blocoIndex, segIndex),
+        });
       }
     });
   });

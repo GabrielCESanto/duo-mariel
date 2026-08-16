@@ -121,17 +121,21 @@ function Viewer({ id }) {
     [musica]
   );
 
+  const [usarVoz, setUsarVoz] = useState(true);
+
   const {
     passagens,
     passagemAtual,
     ouvindo,
     similaridade,
+    textoOuvido,
+    vozSuportada,
     erro,
     iniciar,
     parar,
     avancarManual,
     voltarManual,
-  } = useAcompanhamentoPorAcorde(blocos);
+  } = useAcompanhamentoPorAcorde(blocos, { usarVoz });
 
   if (musica === undefined) return <p className="text-cream-muted text-center py-10">Carregando...</p>;
   if (musica === null || !musica.cifra_cho) {
@@ -186,6 +190,26 @@ function Viewer({ id }) {
           </span>
         </div>
 
+        <label
+          className={`mt-3 flex items-center gap-2 text-xs ${
+            ouvindo ? "text-cream-muted/50" : "text-cream-muted cursor-pointer"
+          }`}
+        >
+          <input
+            type="checkbox"
+            checked={usarVoz}
+            disabled={ouvindo}
+            onChange={(e) => setUsarVoz(e.target.checked)}
+          />
+          Combinar com reconhecimento de voz (resolve acorde repetido em versos diferentes)
+        </label>
+        {usarVoz && !vozSuportada && (
+          <p className="text-amber-400/80 text-xs mt-1">
+            ⚠️ Esse navegador não tem reconhecimento de voz (Web Speech API) — funciona no
+            Chrome/Edge, não no Firefox. Vai acompanhar só pelo acorde mesmo.
+          </p>
+        )}
+
         {erro && <p className="text-red-400 text-sm mt-3">{erro}</p>}
 
         {ouvindo && (
@@ -200,6 +224,11 @@ function Viewer({ id }) {
                 style={{ width: `${Math.min(100, Math.round(similaridade * 100))}%` }}
               />
             </div>
+            {usarVoz && vozSuportada && (
+              <p className="text-cream-muted/70 text-xs mt-2 truncate">
+                🎙️ ouvindo: <span className="italic">{textoOuvido || "..."}</span>
+              </p>
+            )}
           </div>
         )}
       </div>
