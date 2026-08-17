@@ -7,19 +7,33 @@ import { useAcompanhamentoPorAcorde } from "../hooks/useAcompanhamentoPorAcorde"
 
 const BASE = import.meta.env.BASE_URL;
 
-// Protótipo experimental: acompanhamento de cifra "por ouvido" — escuta o
-// microfone e rola a tela sozinha, sem scroll manual nem velocidade fixa.
-// Acessível pelo Menu do admin ("Acompanhamento (teste)") ou direto por
-// /#/teste-acompanhamento (ou /#/teste-acompanhamento/<id da música>).
-//
-// O sinal principal é a VOZ (o que está sendo cantado, casado com a letra
-// das próximas linhas) — reconhecer o acorde tocado por áudio, sozinho,
-// exigiu calibração manual e ainda assim é bem mais impreciso (testado:
-// ~35-40% de semelhança até acertando). O acorde continua disponível como
-// reforço opcional (útil em trecho instrumental, sem letra pra comparar),
-// mas começa desligado.
+const ZOOM_MIN = 0.6;
+const ZOOM_MAX = 2.5;
+const VELOCIDADE_MIN = 5; // px/s
+const VELOCIDADE_MAX = 120;
+const VELOCIDADE_PASSO = 5;
+
+// Mesmo truque da tela de Cifra: "dvh" acompanha a barra de endereço
+// sumindo/aparecendo no celular; "vh" tradicional é o fallback pra
+// navegador sem suporte.
+const ALTURA_TELA_CLASSE =
+  typeof CSS !== "undefined" && CSS.supports?.("height", "100dvh") ? "h-dvh" : "h-screen";
+
+// Página no mesmo estilo visual da tela de Cifra (cabeçalho, zoom, rolagem
+// dedicada), mas com uma linha central fixa ("delimitador") marcando onde
+// está a leitura — o texto rola por baixo dela, ela não se move. Quatro
+// jeitos de mover a tela:
+// - Manual: só o dedo, sem nada automático.
+// - Automático: velocidade constante (igual à tela de Cifra hoje).
+// - Voz / Acorde: acompanhamento por reconhecimento (ver
+//   useAcompanhamentoPorAcorde) — o delimitador central passa a marcar a
+//   linha que o sistema está reconhecendo agora.
+// Não está linkada em nenhum menu do site público — acesse pelo Menu do
+// admin ("Acompanhamento (teste)") ou direto por /#/teste-acompanhamento.
 export default function TesteAcompanhamento() {
   const { id } = useParams();
+
+  if (id) return <Viewer id={id} />;
 
   return (
     <div className="min-h-screen">
@@ -34,7 +48,9 @@ export default function TesteAcompanhamento() {
           </Link>
           <div className="min-w-0 flex-1">
             <span className="section-title text-sm block">Acompanhamento por acorde</span>
-            <span className="text-cream-muted text-xs">protótipo experimental — só escuta, não grava nem envia áudio</span>
+            <span className="text-cream-muted text-xs">
+              protótipo experimental — só escuta, não grava nem envia áudio
+            </span>
           </div>
           <Link
             to="/admin"
@@ -44,7 +60,7 @@ export default function TesteAcompanhamento() {
           </Link>
         </header>
 
-        {id ? <Viewer id={id} /> : <Selecionar />}
+        <Selecionar />
       </div>
     </div>
   );
@@ -109,6 +125,19 @@ function Selecionar() {
 
 function Viewer({ id }) {
   const [musica, setMusica] = useState(undefined); // undefined = carregando, null = não achou
+  const [zoom, setZoom] = useState(1.8);
+  // "manual" (só dedo), "automatico" (velocidade constante, como a tela de
+  // Cifra hoje), "voz" e "acorde" (acompanhamento por reconhecimento) —
+  // mutuamente exclusivos, só um jeito de mover a tela por vez.
+  const [modo, setModo] = useState("voz");
+  const [velocidade, setVelocidade] = useState(15);
+  const [rodandoAuto, setRodandoAuto] = useState(false);
+
+  const scrollRef = useRef(null);
+  const rodandoAutoRef = useRef(false);
+  const velocidadeRef = useRef(velocidade);
+  rodandoAutoRef.current = rodandoAuto;
+  velocidadeRef.current = velocidade;
 
   useEffect(() => {
     supabase
@@ -124,11 +153,6 @@ function Viewer({ id }) {
     [musica]
   );
 
-  // "voz" e "acorde" são mutuamente exclusivos — testado rodando os dois
-  // juntos e o resultado ficava PIOR que qualquer um sozinho (duas
-  // capturas de microfone simultâneas disputando o mesmo hardware)
-  const [modo, setModo] = useState("voz");
-
   const {
     frases,
     fraseAtual,
@@ -142,12 +166,61 @@ function Viewer({ id }) {
     parar,
     avancarManual,
     voltarManual,
-  } = useAcompanhamentoPorAcorde(blocos, { modo });
+  } = useAcompanhamentoPorAcorde(blocos, { modo: modo === "acorde" ? "acorde" : "voz" });
 
-  if (musica === undefined) return <p className="text-cream-muted text-center py-10">Carregando...</p>;
+  const modoReconhecimento = modo === "voz" || modo === "acorde";
+  const emAndamento = modo === "automatico" ? rodandoAuto : modoReconhecimento && ouvindo;
+
+  // --- Loop da rolagem automática (velocidade constante) ---
+  useEffect(() => {
+    if (modo !== "automatico") return;
+    let rafId;
+    let ultimoT = null;
+    let acumulado = 0;
+
+    const passo = (t) => {
+      if (ultimoT !== null && rodandoAutoRef.current && scrollRef.current) {
+        const dt = (t - ultimoT) / 1000;
+        const el = scrollRef.current;
+        acumulado += velocidadeRef.current * dt;
+        const inteiro = Math.floor(acumulado);
+        if (inteiro >= 1) {
+          el.scrollTop += inteiro;
+          acumulado -= inteiro;
+        }
+        if (el.scrollTop + el.clientHeight >= el.scrollHeight - 2) setRodandoAuto(false);
+      }
+      ultimoT = t;
+      rafId = requestAnimationFrame(passo);
+    };
+    rafId = requestAnimationFrame(passo);
+    return () => cancelAnimationFrame(rafId);
+  }, [modo]);
+
+  // --- Tela sempre acesa enquanto algo estiver rolando sozinho ---
+  useEffect(() => {
+    let wakeLock = null;
+    if (emAndamento && navigator.wakeLock) {
+      navigator.wakeLock.request("screen").then((wl) => (wakeLock = wl)).catch(() => {});
+    }
+    return () => wakeLock?.release?.().catch(() => {});
+  }, [emAndamento]);
+
+  const trocarModo = (novo) => {
+    if (ouvindo) parar();
+    setRodandoAuto(false);
+    setModo(novo);
+  };
+
+  const alternarAndamento = () => {
+    if (modo === "automatico") setRodandoAuto((r) => !r);
+    else if (modoReconhecimento) (ouvindo ? parar() : iniciar());
+  };
+
+  if (musica === undefined) return <p className="text-cream-muted text-center py-20">Carregando...</p>;
   if (musica === null || !musica.cifra_cho) {
     return (
-      <p className="text-cream-muted text-center py-10">
+      <p className="text-cream-muted text-center py-20">
         Cifra não encontrada ou não está em ChordPro.{" "}
         <Link to="/teste-acompanhamento" className="text-gold-300">
           Escolher outra
@@ -157,96 +230,134 @@ function Viewer({ id }) {
   }
 
   return (
-    <div>
-      <Link to="/teste-acompanhamento" className="text-xs text-cream-muted hover:text-gold-300">
-        ← Escolher outra
-      </Link>
-      <h1 className="text-cream text-xl mt-2">{musica.nome}</h1>
-      <p className="text-cream-muted text-sm mb-4">{musica.artista}</p>
-
-      <div className="border border-noir-700 rounded-2xl p-4 bg-noir-900/50 mb-4">
-        <div className="flex items-center gap-2 flex-wrap">
-          {!ouvindo ? (
-            <button onClick={iniciar} className="btn-gold px-5 py-2.5 rounded-xl text-sm">
-              🎤 Iniciar escuta
-            </button>
-          ) : (
+    <div className={`${ALTURA_TELA_CLASSE} flex flex-col`}>
+      <header className="border-b border-noir-800 bg-noir-900/90 shrink-0 px-3 py-3 md:px-6 md:py-4">
+        <div className="grid grid-cols-3 items-center gap-2">
+          <Link
+            to="/admin"
+            className="justify-self-start px-4 py-2.5 rounded-xl border border-noir-700 text-cream-muted text-sm hover:text-gold-300 hover:border-gold-600 transition"
+          >
+            ‹ Menu
+          </Link>
+          <div className="justify-self-center min-w-0 text-center">
+            <p className="text-cream truncate">{musica.nome}</p>
+            <p className="text-cream-muted text-xs truncate">{musica.artista}</p>
+          </div>
+          <div className="justify-self-end flex items-center gap-1.5">
             <button
-              onClick={parar}
-              className="px-5 py-2.5 rounded-xl text-sm border border-red-800 text-red-300 hover:bg-noir-800 transition"
+              onClick={() => setZoom((z) => Math.max(ZOOM_MIN, +(z - 0.15).toFixed(2)))}
+              aria-label="Diminuir zoom"
+              className="w-9 h-9 rounded-lg border border-noir-700 text-cream text-sm hover:border-gold-600 transition"
             >
-              ⏹ Parar
+              A−
             </button>
-          )}
-          <button
-            onClick={voltarManual}
-            className="px-3 py-2.5 rounded-xl text-sm border border-noir-700 text-cream-muted hover:text-cream transition"
-          >
-            ◀
-          </button>
-          <button
-            onClick={avancarManual}
-            className="px-3 py-2.5 rounded-xl text-sm border border-noir-700 text-cream-muted hover:text-cream transition"
-          >
-            ▶
-          </button>
-          <span className="text-cream-muted text-xs">
-            {frases.length === 0
-              ? "sem letra nessa cifra"
-              : `linha ${Math.min(frases.indexOf(fraseAtual) + 1, frases.length)}/${frases.length}`}
-          </span>
+            <button
+              onClick={() => setZoom((z) => Math.min(ZOOM_MAX, +(z + 0.15).toFixed(2)))}
+              aria-label="Aumentar zoom"
+              className="w-9 h-9 rounded-lg border border-noir-700 text-cream text-sm hover:border-gold-600 transition"
+            >
+              A+
+            </button>
+          </div>
         </div>
 
-        <div className="mt-3 flex flex-col gap-1.5">
-          <label
-            className={`flex items-center gap-2 text-xs ${
-              ouvindo ? "text-cream-muted/50" : "text-cream-muted cursor-pointer"
-            }`}
-          >
-            <input
-              type="radio"
-              name="modo-acompanhamento"
-              checked={modo === "voz"}
-              disabled={ouvindo}
-              onChange={() => setModo("voz")}
-            />
-            Por voz (mais confiável — compara o que você canta com a letra)
-          </label>
-          {modo === "voz" && (
-            <p className="text-cream-muted/60 text-xs pl-6">
-              idioma detectado pela letra: <span className="text-gold-300">{idioma}</span>
-            </p>
-          )}
-          <label
-            className={`flex items-center gap-2 text-xs ${
-              ouvindo ? "text-cream-muted/50" : "text-cream-muted cursor-pointer"
-            }`}
-          >
-            <input
-              type="radio"
-              name="modo-acompanhamento"
-              checked={modo === "acorde"}
-              disabled={ouvindo}
-              onChange={() => setModo("acorde")}
-            />
-            Por acorde (experimental, mais impreciso)
-          </label>
+        <div className="gold-rule my-2.5" />
+
+        <div className="flex flex-wrap items-center justify-center gap-1.5">
+          {[
+            ["manual", "Manual"],
+            ["automatico", "Automático"],
+            ["voz", "Voz"],
+            ["acorde", "Acorde"],
+          ].map(([valor, rotulo]) => (
+            <button
+              key={valor}
+              onClick={() => trocarModo(valor)}
+              className={`px-3 py-1.5 rounded-full text-xs tracking-wide transition border ${
+                modo === valor
+                  ? "btn-gold border-transparent"
+                  : "border-noir-700 text-cream-muted hover:text-cream"
+              }`}
+            >
+              {rotulo}
+            </button>
+          ))}
         </div>
-        {modo === "voz" && !vozSuportada && (
-          <p className="text-amber-400/80 text-xs mt-1">
-            ⚠️ Esse navegador não tem reconhecimento de voz (Web Speech API) — funciona no
-            Chrome/Edge, não no Firefox.
-          </p>
+
+        {modo === "automatico" && (
+          <div className="flex items-center justify-center gap-3 mt-2.5">
+            <button
+              onClick={() => setVelocidade((v) => Math.max(VELOCIDADE_MIN, v - VELOCIDADE_PASSO))}
+              aria-label="Mais devagar"
+              className="w-9 h-9 rounded-lg border border-noir-700 text-cream text-lg hover:border-gold-600 transition"
+            >
+              −
+            </button>
+            <button
+              onClick={alternarAndamento}
+              aria-label={rodandoAuto ? "Pausar" : "Rolar"}
+              className="btn-gold w-20 h-9 rounded-xl text-xl"
+            >
+              {rodandoAuto ? "❚❚" : "▶"}
+            </button>
+            <button
+              onClick={() => setVelocidade((v) => Math.min(VELOCIDADE_MAX, v + VELOCIDADE_PASSO))}
+              aria-label="Mais rápido"
+              className="w-9 h-9 rounded-lg border border-noir-700 text-cream text-lg hover:border-gold-600 transition"
+            >
+              +
+            </button>
+            <span className="text-cream-muted text-xs">{velocidade}px/s</span>
+          </div>
         )}
 
-        {erro && <p className="text-red-400 text-sm mt-3">{erro}</p>}
+        {modoReconhecimento && (
+          <div className="mt-2.5">
+            <div className="flex items-center justify-center gap-2 flex-wrap">
+              <button
+                onClick={alternarAndamento}
+                className={`px-5 py-2 rounded-xl text-sm ${
+                  ouvindo
+                    ? "border border-red-800 text-red-300 hover:bg-noir-800 transition"
+                    : "btn-gold"
+                }`}
+              >
+                {ouvindo ? "⏹ Parar" : "🎤 Iniciar escuta"}
+              </button>
+              <button
+                onClick={voltarManual}
+                className="w-9 h-9 rounded-lg border border-noir-700 text-sm text-cream-muted hover:text-cream transition"
+              >
+                ◀
+              </button>
+              <button
+                onClick={avancarManual}
+                className="w-9 h-9 rounded-lg border border-noir-700 text-sm text-cream-muted hover:text-cream transition"
+              >
+                ▶
+              </button>
+              <span className="text-cream-muted text-xs">
+                {frases.length === 0
+                  ? "sem letra"
+                  : `linha ${Math.min(frases.indexOf(fraseAtual) + 1, frases.length)}/${frases.length}`}
+              </span>
+            </div>
 
-        {ouvindo && (
-          <div className="mt-3">
-            {modo === "acorde" ? (
-              <>
-                <p className="text-cream-muted text-xs mb-1">
-                  esperando <span className="text-gold-300">{fraseAtual?.chord}</span> — semelhança{" "}
+            {modo === "voz" && (
+              <p className="text-cream-muted/60 text-xs text-center mt-1.5">
+                idioma detectado: <span className="text-gold-300">{idioma}</span>
+                {!vozSuportada && (
+                  <span className="text-amber-400/80"> — navegador sem suporte a voz (use Chrome/Edge)</span>
+                )}
+              </p>
+            )}
+
+            {erro && <p className="text-red-400 text-xs text-center mt-1.5">{erro}</p>}
+
+            {ouvindo && modo === "acorde" && (
+              <div className="max-w-xs mx-auto mt-2">
+                <p className="text-cream-muted text-xs mb-1 text-center">
+                  esperando <span className="text-gold-300">{fraseAtual?.chord}</span> —{" "}
                   {Math.round(similaridade * 100)}%
                 </p>
                 <div className="h-1.5 rounded-full bg-noir-800 overflow-hidden">
@@ -255,17 +366,31 @@ function Viewer({ id }) {
                     style={{ width: `${Math.min(100, Math.round(similaridade * 100))}%` }}
                   />
                 </div>
-              </>
-            ) : (
-              <p className="text-cream-muted/70 text-xs truncate">
-                🎙️ ouvindo: <span className="italic">{textoOuvido || "..."}</span>
+              </div>
+            )}
+            {ouvindo && modo === "voz" && (
+              <p className="text-cream-muted/70 text-xs text-center mt-1.5 truncate">
+                🎙️ <span className="italic">{textoOuvido || "..."}</span>
               </p>
             )}
           </div>
         )}
-      </div>
+      </header>
 
-      <CifraChoAcompanhada blocos={blocos} fraseAtual={fraseAtual} />
+      <div className="relative flex-1 min-h-0">
+        <div ref={scrollRef} className="absolute inset-0 overflow-y-auto px-4">
+          <div style={{ fontSize: `${zoom}rem` }}>
+            <CifraChoAcompanhada
+              blocos={blocos}
+              fraseAtual={modoReconhecimento ? fraseAtual : null}
+              scrollRef={scrollRef}
+            />
+          </div>
+        </div>
+        {/* Delimitador: linha fixa no centro vertical da área de rolagem —
+            o texto passa por baixo dela, ela nunca se move */}
+        <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 border-t-2 border-gold-500/50 pointer-events-none" />
+      </div>
     </div>
   );
 }
@@ -277,43 +402,51 @@ function suavizar(t) {
   return t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
 }
 
-// Rola a JANELA (não o elemento) até centralizar `alvo` — com duração
-// fixa e evitando cancelar/reiniciar via scrollIntoView nativo, que em
-// alguns navegadores decide uma duração curta demais pra saltos grandes e
-// parece "pular" em vez de rolar. `sinalizarParada` permite interromper a
-// animação se uma frase mais nova chegar antes dela terminar.
-function rolarAteCentralizar(alvo, sinalizarParada) {
-  if (!alvo) return;
+// Rola o CONTAINER (não a janela) até alinhar `alvo` com o delimitador no
+// centro — duração fixa, com aceleração/desaceleração, em vez do
+// scrollIntoView nativo (que em saltos maiores decide uma duração curta
+// demais e parece "pular"). `sinalizarParada` interrompe a animação se
+// uma frase mais nova chegar antes dela terminar.
+function rolarAteCentralizar(container, alvo, sinalizarParada) {
+  if (!container || !alvo) return;
   const DURACAO_MS = 550;
-  const retangulo = alvo.getBoundingClientRect();
-  const alvoY = window.scrollY + retangulo.top - window.innerHeight / 2 + retangulo.height / 2;
-  const inicioY = window.scrollY;
-  const distancia = alvoY - inicioY;
+  const retanguloAlvo = alvo.getBoundingClientRect();
+  const retanguloContainer = container.getBoundingClientRect();
+  const alvoTop =
+    container.scrollTop +
+    (retanguloAlvo.top - retanguloContainer.top) -
+    container.clientHeight / 2 +
+    retanguloAlvo.height / 2;
+  const inicioTop = container.scrollTop;
+  const distancia = alvoTop - inicioTop;
   const t0 = performance.now();
 
   const passo = (agora) => {
     if (sinalizarParada.parado) return;
     const progresso = Math.min(1, (agora - t0) / DURACAO_MS);
-    window.scrollTo(0, inicioY + distancia * suavizar(progresso));
+    container.scrollTop = inicioTop + distancia * suavizar(progresso);
     if (progresso < 1) requestAnimationFrame(passo);
   };
   requestAnimationFrame(passo);
 }
 
-function CifraChoAcompanhada({ blocos, fraseAtual }) {
+function CifraChoAcompanhada({ blocos, fraseAtual, scrollRef }) {
   const refsLinha = useRef({});
 
   useEffect(() => {
     if (!fraseAtual) return;
     const sinalizarParada = { parado: false };
-    rolarAteCentralizar(refsLinha.current[fraseAtual.blocoIndex], sinalizarParada);
+    rolarAteCentralizar(scrollRef.current, refsLinha.current[fraseAtual.blocoIndex], sinalizarParada);
     return () => {
       sinalizarParada.parado = true;
     };
-  }, [fraseAtual]);
+  }, [fraseAtual, scrollRef]);
 
+  // Espaço em branco acima/abaixo do texto do tamanho de meia tela — sem
+  // isso a primeira e a última linha nunca conseguem chegar até o
+  // delimitador central (não sobra pra onde rolar)
   return (
-    <div className="pb-10 text-cream">
+    <div className="max-w-2xl mx-auto text-cream py-[45vh]">
       {blocos.map((b, i) => {
         if (b.tipo === "vazio") return <div key={i} className="h-4" />;
         if (b.tipo === "meta") {

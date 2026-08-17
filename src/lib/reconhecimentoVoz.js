@@ -39,8 +39,15 @@ function distanciaEdicao(a, b) {
 // comparação ficava "ao pé da letra": bastava a voz reconhecer uma
 // palavra um pouco diferente (plural, gíria, ruído) pra ela nunca contar
 // como acerto, mesmo claramente sendo a mesma palavra cantada.
+//
+// Palavra com menos de 4 letras exige igualdade exata — abaixo disso a
+// tolerância vira armadilha: "de" e "me" ficam a 1 letra de distância uma
+// da outra, então QUALQUER palavra curta batia com QUALQUER outra palavra
+// curta do texto alvo, causando saltos pra linha errada só por causa de
+// preposições/artigos em comum ("hoje", "de", "me"...).
 function palavrasParecidas(a, b) {
   if (a === b) return true;
+  if (a.length < 4 || b.length < 4) return false;
   const tolerancia = Math.max(1, Math.floor(Math.max(a.length, b.length) * 0.3));
   return distanciaEdicao(a, b) <= tolerancia;
 }

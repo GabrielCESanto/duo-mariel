@@ -24,7 +24,15 @@ const LIMIAR_VOZ = 0.35;
 // longe demais, e numa 2ª estrofe/refrão idêntico ao primeiro, uma janela
 // larga alcançava a repetição ERRADA lá na frente. Contar por palavra é
 // mais consistente independente de como a letra foi quebrada em linhas.
-const PALAVRAS_JANELA_VOZ = 20;
+// Reduzido de 20 pra 15 — 20 ainda deixava alcançar coincidências longe
+// demais da posição real.
+const PALAVRAS_JANELA_VOZ = 15;
+// Quantas linhas pode voltar, além de avançar — testado só pra frente e
+// dava problema: se um match errado empurrasse a posição adiante demais
+// (ex.: bug de palavra curta batendo à toa, já corrigido), a busca nunca
+// mais alcançava de volta a linha certa, mesmo reconhecendo tudo direito
+// depois. Uma margem pequena pra trás permite se corrigir sozinho.
+const RETROCESSO_LINHAS_VOZ = 2;
 // Teto de segurança em linhas, mesmo se elas forem muito curtas (ex.:
 // um trecho todo em "la la la") — sem isso, um monte de linhas curtas
 // poderia esticar a janela de palavras bem mais longe do que deveria.
@@ -42,8 +50,11 @@ const ANTECIPACAO_LINHAS_VOZ = 1;
 // "isFinal". Comparar esse texto todo contra uma linha-alvo curta dilui a
 // pontuação sem necessidade — por isso só as últimas palavras ouvidas
 // entram na comparação (o que interessa é o que está sendo cantado
-// AGORA, não o histórico da frase toda).
-const PALAVRAS_RECENTES_VOZ = 4;
+// AGORA, não o histórico da frase toda). Subido de 4 pra 6 — uma frase
+// maior é evidência mais confiável e dispara o salto com menos frequência
+// (o problema relatado foi "pula a cada trechinho reconhecido", ficando
+// difícil de acompanhar de olho).
+const PALAVRAS_RECENTES_VOZ = 6;
 
 // Só avança por acorde quando o PRÓXIMO esperado passa desse limiar —
 // testado antes como margem relativa ao atual (o próximo precisa bater
@@ -114,17 +125,16 @@ export function useAcompanhamentoPorAcorde(blocos, { modo = "voz" } = {}) {
   };
 
   // A cada frase (parcial ou final) reconhecida, procura na janela das
-  // próximas frases qual texto bate melhor com o que foi ouvido. Só pula
-  // pra frente (nunca volta) — uma palavra mal reconhecida batendo por
-  // acaso com um trecho anterior não deve fazer a tela voltar.
+  // próximas frases (e um pouco pra trás, ver RETROCESSO_LINHAS_VOZ) qual
+  // texto bate melhor com o que foi ouvido.
   const avaliarVoz = (texto) => {
     // Só as últimas palavras — ver comentário de PALAVRAS_RECENTES_VOZ
     const recorte = texto.trim().split(/\s+/).filter(Boolean).slice(-PALAVRAS_RECENTES_VOZ).join(" ");
 
-    const inicio = indiceRef.current;
-    let fim = inicio;
+    const inicio = Math.max(0, indiceRef.current - RETROCESSO_LINHAS_VOZ);
+    let fim = indiceRef.current;
     let palavrasNaJanela = 0;
-    while (fim < frases.length && fim - inicio < LINHAS_MAX_JANELA_VOZ) {
+    while (fim < frases.length && fim - indiceRef.current < LINHAS_MAX_JANELA_VOZ) {
       palavrasNaJanela += frases[fim].texto.split(/\s+/).filter(Boolean).length;
       fim++;
       if (palavrasNaJanela >= PALAVRAS_JANELA_VOZ) break;
@@ -140,10 +150,12 @@ export function useAcompanhamentoPorAcorde(blocos, { modo = "voz" } = {}) {
       }
     }
 
-    // Só conta como progresso de verdade se o match achado for além da
-    // posição atual — aí sim pula, mas pra ANTECIPACAO_LINHAS_VOZ à frente
-    // do que foi confirmado (ver comentário da constante)
-    if (melhorIndice > indiceRef.current) {
+    // Pula pra qualquer match que bater o suficiente — pra frente (o
+    // normal) ou pra trás dentro da margem de RETROCESSO_LINHAS_VOZ (se
+    // uma detecção anterior avançou longe demais, isso se autocorrige).
+    // Sempre com ANTECIPACAO_LINHAS_VOZ à frente do que foi confirmado
+    // (ver comentário da constante).
+    if (melhorIndice !== -1) {
       mudarIndice(melhorIndice + ANTECIPACAO_LINHAS_VOZ);
     }
   };
