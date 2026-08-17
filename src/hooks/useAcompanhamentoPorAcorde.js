@@ -24,7 +24,7 @@ const LIMIAR_VOZ = 0.35;
 // longe demais, e numa 2ª estrofe/refrão idêntico ao primeiro, uma janela
 // larga alcançava a repetição ERRADA lá na frente. Contar por palavra é
 // mais consistente independente de como a letra foi quebrada em linhas.
-const PALAVRAS_JANELA_VOZ = 30;
+const PALAVRAS_JANELA_VOZ = 20;
 // Teto de segurança em linhas, mesmo se elas forem muito curtas (ex.:
 // um trecho todo em "la la la") — sem isso, um monte de linhas curtas
 // poderia esticar a janela de palavras bem mais longe do que deveria.
@@ -50,38 +50,40 @@ const PALAVRAS_RECENTES_VOZ = 4;
 // X pontos melhor que o atual) e ficou restritivo demais quando os dois
 // ficam próximos (teste real: errado ~50-55%, certo ~70-75% — só 20
 // pontos de folga, a margem de 0,15 quase sempre falhava). Um limiar
-// absoluto é mais direto: passou de 60%, é o próximo acorde de verdade.
-const LIMIAR_AVANCO_ACORDE = 0.6;
+// absoluto é mais direto. Baixado de 0,6 pra 0,5 depois de mais teste
+// real: acorde certo às vezes só chegava a 50-55% e nunca passava de
+// 60%, travando a rolagem — o efeito colateral é ficar bem em cima do
+// teto do errado (~50%), então algum falso positivo ocasional é esperado
+// como troca por destravar os acertos.
+const LIMIAR_AVANCO_ACORDE = 0.5;
 // E só depois de bater assim por esse tempo seguido — evita disparo em
 // falso durante a troca de dedo/mão de um acorde pro outro.
 const TEMPO_ESTAVEL_ACORDE_MS = 220;
-// Enquanto a voz estiver ativa e tiver ouvido algo há pouco tempo, o
-// acorde não deve tentar avançar sozinho — testado com os dois ligados
-// juntos e, tocando o ritmo (não uma nota sustentada), o acorde errava
-// mais e "brigava" com a posição que a voz já tinha acertado. O acorde só
-// assume de novo depois de um tempo sem voz nenhuma (silêncio real, ex.:
-// trecho instrumental).
-const SILENCIO_VOZ_PARA_ACORDE_MS = 2000;
 
 // Escuta o microfone e acompanha, sozinho, em qual linha da cifra o
 // músico está cantando agora — pra rolar a tela sem precisar de scroll
 // manual nem de velocidade fixa.
 //
-// O sinal principal é a VOZ: compara o que está sendo cantado com a letra
-// das próximas frases (janela pequena, sempre "pronta" a partir da
-// posição atual) e segue a que bater. É mais direto que tentar reconhecer
-// o acorde tocado — decidir "qual das próximas linhas é essa" a partir do
-// que foi dito é mais barato e mais confiável do que casar o timbre real
-// de um instrumento contra um molde matemático de acorde.
+// `modo` é "voz" (padrão) ou "acorde" — mutuamente exclusivos, nunca os
+// dois ao mesmo tempo. Chegaram a rodar juntos (voz como sinal principal,
+// acorde como reforço em segundo plano), mas testado na prática o
+// resultado combinado ficava PIOR que qualquer um sozinho: a Web Speech
+// API pede o microfone por conta própria, sem ser o mesmo stream usado
+// pra analisar o acorde — duas capturas de áudio simultâneas do mesmo
+// hardware disputando recurso, mesmo com a lógica achando que estava
+// tudo coordenado. Mais simples e mais confiável escolher um dos dois.
 //
-// O ACORDE (opcional, `usarAcorde`) fica como reforço: útil só quando não
-// tem letra pra comparar (trecho instrumental) ou o navegador não suporta
-// reconhecimento de voz — mas nos testes reais precisou de calibração
-// manual e ainda assim é o sinal mais fraco dos dois, por isso começa
-// desligado.
+// VOZ: compara o que está sendo cantado com a letra das próximas frases
+// (janela pequena, sempre "pronta" a partir da posição atual) e segue a
+// que bater. É o sinal mais confiável dos dois nos testes reais.
+//
+// ACORDE: compara o som captado com o acorde atual/próximo esperado da
+// cifra. Precisou de bastante calibração manual e continua sendo o sinal
+// mais fraco — útil principalmente quando não tem letra pra comparar
+// (trecho instrumental) ou o navegador não suporta reconhecimento de voz.
 //
 // `blocos` é o retorno de parseChordPro().
-export function useAcompanhamentoPorAcorde(blocos, { usarVoz = true, usarAcorde = false } = {}) {
+export function useAcompanhamentoPorAcorde(blocos, { modo = "voz" } = {}) {
   const frases = useMemo(() => construirFrases(blocos), [blocos]);
   const idioma = useMemo(() => detectarIdioma(frases.map((f) => f.texto).join(" ")), [frases]);
 
@@ -98,7 +100,6 @@ export function useAcompanhamentoPorAcorde(blocos, { usarVoz = true, usarAcorde 
   const rafRef = useRef(null);
   const estavelDesdeRef = useRef(0);
   const vozRef = useRef(null);
-  const ultimaVozEmRef = useRef(0);
 
   // Muda de música (ou a cifra foi editada) — recomeça do início
   useEffect(() => {
@@ -117,8 +118,6 @@ export function useAcompanhamentoPorAcorde(blocos, { usarVoz = true, usarAcorde 
   // pra frente (nunca volta) — uma palavra mal reconhecida batendo por
   // acaso com um trecho anterior não deve fazer a tela voltar.
   const avaliarVoz = (texto) => {
-    ultimaVozEmRef.current = performance.now();
-
     // Só as últimas palavras — ver comentário de PALAVRAS_RECENTES_VOZ
     const recorte = texto.trim().split(/\s+/).filter(Boolean).slice(-PALAVRAS_RECENTES_VOZ).join(" ");
 
@@ -154,16 +153,6 @@ export function useAcompanhamentoPorAcorde(blocos, { usarVoz = true, usarAcorde 
     const ctx = contextoRef.current;
     if (!analyser || !ctx) return;
 
-    // A voz tem prioridade: se ela estiver ativa e ouviu algo há pouco,
-    // deixa o acorde de lado (ver SILENCIO_VOZ_PARA_ACORDE_MS)
-    const vozAtivaAgora =
-      usarVoz && reconhecimentoDeVozSuportado && performance.now() - ultimaVozEmRef.current < SILENCIO_VOZ_PARA_ACORDE_MS;
-    if (vozAtivaAgora) {
-      estavelDesdeRef.current = 0;
-      rafRef.current = requestAnimationFrame(lacoAcorde);
-      return;
-    }
-
     const chroma = extrairChroma(analyser, ctx.sampleRate);
     const atual = frases[indiceRef.current];
     const proximoIndice = proximaFraseComAcordeDiferente(frases, indiceRef.current);
@@ -192,15 +181,15 @@ export function useAcompanhamentoPorAcorde(blocos, { usarVoz = true, usarAcorde 
       setErro("Essa cifra não tem letra pra acompanhar.");
       return;
     }
-    if (!usarVoz && !usarAcorde) {
-      setErro("Ative pelo menos um sinal (voz ou acorde) pra acompanhar.");
+    if (modo === "voz" && !reconhecimentoDeVozSuportado) {
+      setErro("Esse navegador não suporta reconhecimento de voz.");
       return;
     }
 
     try {
       setErro(null);
 
-      if (usarAcorde) {
+      if (modo === "acorde") {
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
         });
@@ -228,9 +217,7 @@ export function useAcompanhamentoPorAcorde(blocos, { usarVoz = true, usarAcorde 
         contextoRef.current = ctx;
         analyserRef.current = analyser;
         rafRef.current = requestAnimationFrame(lacoAcorde);
-      }
-
-      if (usarVoz && reconhecimentoDeVozSuportado) {
+      } else {
         vozRef.current = criarReconhecedorDeVoz({
           idioma,
           onTexto: (texto) => {

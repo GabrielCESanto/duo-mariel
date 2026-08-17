@@ -124,8 +124,10 @@ function Viewer({ id }) {
     [musica]
   );
 
-  const [usarVoz, setUsarVoz] = useState(true);
-  const [usarAcorde, setUsarAcorde] = useState(false);
+  // "voz" e "acorde" são mutuamente exclusivos — testado rodando os dois
+  // juntos e o resultado ficava PIOR que qualquer um sozinho (duas
+  // capturas de microfone simultâneas disputando o mesmo hardware)
+  const [modo, setModo] = useState("voz");
 
   const {
     frases,
@@ -140,7 +142,7 @@ function Viewer({ id }) {
     parar,
     avancarManual,
     voltarManual,
-  } = useAcompanhamentoPorAcorde(blocos, { usarVoz, usarAcorde });
+  } = useAcompanhamentoPorAcorde(blocos, { modo });
 
   if (musica === undefined) return <p className="text-cream-muted text-center py-10">Carregando...</p>;
   if (musica === null || !musica.cifra_cho) {
@@ -202,14 +204,15 @@ function Viewer({ id }) {
             }`}
           >
             <input
-              type="checkbox"
-              checked={usarVoz}
+              type="radio"
+              name="modo-acompanhamento"
+              checked={modo === "voz"}
               disabled={ouvindo}
-              onChange={(e) => setUsarVoz(e.target.checked)}
+              onChange={() => setModo("voz")}
             />
-            Acompanhar por voz (sinal principal — compara o que você canta com a letra)
+            Por voz (mais confiável — compara o que você canta com a letra)
           </label>
-          {usarVoz && (
+          {modo === "voz" && (
             <p className="text-cream-muted/60 text-xs pl-6">
               idioma detectado pela letra: <span className="text-gold-300">{idioma}</span>
             </p>
@@ -220,15 +223,16 @@ function Viewer({ id }) {
             }`}
           >
             <input
-              type="checkbox"
-              checked={usarAcorde}
+              type="radio"
+              name="modo-acompanhamento"
+              checked={modo === "acorde"}
               disabled={ouvindo}
-              onChange={(e) => setUsarAcorde(e.target.checked)}
+              onChange={() => setModo("acorde")}
             />
-            Reforçar com detecção de acorde (experimental, mais impreciso)
+            Por acorde (experimental, mais impreciso)
           </label>
         </div>
-        {usarVoz && !vozSuportada && (
+        {modo === "voz" && !vozSuportada && (
           <p className="text-amber-400/80 text-xs mt-1">
             ⚠️ Esse navegador não tem reconhecimento de voz (Web Speech API) — funciona no
             Chrome/Edge, não no Firefox.
@@ -239,7 +243,7 @@ function Viewer({ id }) {
 
         {ouvindo && (
           <div className="mt-3">
-            {usarAcorde && (
+            {modo === "acorde" ? (
               <>
                 <p className="text-cream-muted text-xs mb-1">
                   esperando <span className="text-gold-300">{fraseAtual?.chord}</span> — semelhança{" "}
@@ -252,9 +256,8 @@ function Viewer({ id }) {
                   />
                 </div>
               </>
-            )}
-            {usarVoz && vozSuportada && (
-              <p className="text-cream-muted/70 text-xs mt-2 truncate">
+            ) : (
+              <p className="text-cream-muted/70 text-xs truncate">
                 🎙️ ouvindo: <span className="italic">{textoOuvido || "..."}</span>
               </p>
             )}
