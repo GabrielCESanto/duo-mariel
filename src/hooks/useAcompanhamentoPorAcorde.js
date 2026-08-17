@@ -18,11 +18,17 @@ import {
 // bastava a voz reconhecer só metade errado de uma linha curta pra nunca
 // passar) e depois em 0,4; ajustado pra 0,35 depois de mais testes reais.
 const LIMIAR_VOZ = 0.35;
-// Só olha as próximas N frases a partir da atual — testado com uma busca
-// bem mais ampla (25 frases à frente) e ficou pior: matches por
-// coincidência lá na frente, e mais lento pra recalcular a cada frase
-// ouvida. Testado em 5 e pedido pra dobrar depois de mais uso real.
-const JANELA_VOZ = 10;
+// Até quantas palavras (somando as próximas linhas) a busca por voz
+// olha à frente — testado com janela fixa em linhas (5, depois 10) e deu
+// problema: linha curta vira janela curta demais, linha longa vira janela
+// longe demais, e numa 2ª estrofe/refrão idêntico ao primeiro, uma janela
+// larga alcançava a repetição ERRADA lá na frente. Contar por palavra é
+// mais consistente independente de como a letra foi quebrada em linhas.
+const PALAVRAS_JANELA_VOZ = 30;
+// Teto de segurança em linhas, mesmo se elas forem muito curtas (ex.:
+// um trecho todo em "la la la") — sem isso, um monte de linhas curtas
+// poderia esticar a janela de palavras bem mais longe do que deveria.
+const LINHAS_MAX_JANELA_VOZ = 7;
 // Quando confirma que uma linha foi cantada, mostra a de baixo (não a
 // que acabou de confirmar) — o reconhecimento de voz tem uma latência
 // inerente (leva um tempinho pra transcrever), então no momento em que a
@@ -37,21 +43,18 @@ const ANTECIPACAO_LINHAS_VOZ = 1;
 // pontuação sem necessidade — por isso só as últimas palavras ouvidas
 // entram na comparação (o que interessa é o que está sendo cantado
 // AGORA, não o histórico da frase toda).
-const PALAVRAS_RECENTES_VOZ = 5;
+const PALAVRAS_RECENTES_VOZ = 4;
 
-// Só avança por acorde quando o próximo bate MELHOR que o atual por essa
-// margem — evita trocar de linha por ruído/harmônico parecido. Testado
-// real ("O Sol", Jota Quest) mostrou uma diferença grande entre certo e
-// errado, então dá pra pedir uma margem mais folgada que 0,1 sem medo.
-const MARGEM_ACORDE = 0.15;
+// Só avança por acorde quando o PRÓXIMO esperado passa desse limiar —
+// testado antes como margem relativa ao atual (o próximo precisa bater
+// X pontos melhor que o atual) e ficou restritivo demais quando os dois
+// ficam próximos (teste real: errado ~50-55%, certo ~70-75% — só 20
+// pontos de folga, a margem de 0,15 quase sempre falhava). Um limiar
+// absoluto é mais direto: passou de 60%, é o próximo acorde de verdade.
+const LIMIAR_AVANCO_ACORDE = 0.6;
 // E só depois de bater assim por esse tempo seguido — evita disparo em
 // falso durante a troca de dedo/mão de um acorde pro outro.
 const TEMPO_ESTAVEL_ACORDE_MS = 220;
-// Abaixo disso, a semelhança é baixa demais pra confiar. Recalibrado
-// depois de trocar a fórmula de similaridadeChroma (ver comentário lá) —
-// nesse teste real, acorde certo por volta de ~55%, errado por volta de
-// ~11%. 0,3 fica confortavelmente entre os dois.
-const SIMILARIDADE_MINIMA_ACORDE = 0.3;
 // Enquanto a voz estiver ativa e tiver ouvido algo há pouco tempo, o
 // acorde não deve tentar avançar sozinho — testado com os dois ligados
 // juntos e, tocando o ritmo (não uma nota sustentada), o acorde errava
@@ -120,7 +123,13 @@ export function useAcompanhamentoPorAcorde(blocos, { usarVoz = true, usarAcorde 
     const recorte = texto.trim().split(/\s+/).filter(Boolean).slice(-PALAVRAS_RECENTES_VOZ).join(" ");
 
     const inicio = indiceRef.current;
-    const fim = Math.min(frases.length, inicio + JANELA_VOZ);
+    let fim = inicio;
+    let palavrasNaJanela = 0;
+    while (fim < frases.length && fim - inicio < LINHAS_MAX_JANELA_VOZ) {
+      palavrasNaJanela += frases[fim].texto.split(/\s+/).filter(Boolean).length;
+      fim++;
+      if (palavrasNaJanela >= PALAVRAS_JANELA_VOZ) break;
+    }
     let melhorIndice = -1;
     let melhorPontuacao = LIMIAR_VOZ;
 
@@ -163,10 +172,9 @@ export function useAcompanhamentoPorAcorde(blocos, { usarVoz = true, usarAcorde 
     const simProxima = proxima ? similaridadeChroma(chroma, gerarTemplateAcorde(proxima.chord)) : -1;
     setSimilaridade(simAtual);
 
-    const bateMelhorQueAtual =
-      simProxima > simAtual + MARGEM_ACORDE && simProxima > SIMILARIDADE_MINIMA_ACORDE;
+    const passouDoLimiar = simProxima > LIMIAR_AVANCO_ACORDE;
     const agora = performance.now();
-    if (bateMelhorQueAtual) {
+    if (passouDoLimiar) {
       if (!estavelDesdeRef.current) estavelDesdeRef.current = agora;
       if (agora - estavelDesdeRef.current > TEMPO_ESTAVEL_ACORDE_MS) {
         mudarIndice(proximoIndice);
