@@ -73,12 +73,14 @@ export const reconhecimentoDeVozSuportado = Boolean(SpeechRecognitionAPI);
 // Envelope fino sobre a Web Speech API. Reinicia sozinho quando o
 // navegador para de escutar por silêncio (comum no modo "continuous" do
 // Chrome, que não é de fato contínuo o tempo todo), enquanto ninguém
-// tiver chamado `parar()`.
-export function criarReconhecedorDeVoz({ onTexto, onErro }) {
+// tiver chamado `parar()`. `idioma` é o código BCP 47 (ex.: "pt-BR",
+// "en-US", "es-ES") — normalmente vem de detectarIdioma(), aplicado na
+// letra da própria música.
+export function criarReconhecedorDeVoz({ idioma = "pt-BR", onTexto, onErro }) {
   if (!SpeechRecognitionAPI) return null;
 
   const reconhecimento = new SpeechRecognitionAPI();
-  reconhecimento.lang = "pt-BR";
+  reconhecimento.lang = idioma;
   reconhecimento.continuous = true;
   reconhecimento.interimResults = true;
 

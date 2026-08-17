@@ -60,32 +60,67 @@ export function gerarTemplateAcorde(acorde) {
 }
 
 // Faixa de frequência considerada: abaixo disso é só ruído/zumbido de
-// ambiente, acima disso já são harmônicos que mais atrapalham do que
-// ajudam a identificar a nota fundamental que está soando.
-const FREQ_MIN = 80; // ~E2, a corda mais grave de um violão
-const FREQ_MAX = 1200;
+// ambiente, acima disso já é região que mais atrapalha (ruído, harmônicos
+// distantes) do que ajuda a identificar o que está soando.
+const FREQ_MIN = 65; // ~C2, uma margem abaixo do E2 (corda mais grave do violão em afinação padrão)
+const FREQ_MAX = 1050; // um pouco acima do E5 — cobre acorde aberto/1ª posição com folga
 const DB_MINIMO = -85; // abaixo disso, é silêncio/ruído de fundo
+
+const NOTA_BASE_HZ = 130.81; // C3
+// Oitavas buscadas a partir de C3, pra cada uma das 12 classes — cobre
+// aproximadamente C2 até C6, a faixa onde um violão em afinação padrão
+// concentra a fundamental dos acordes abertos/1ª posição (o repertório
+// mais comum de show).
+const OITAVAS_BUSCADAS = [-1, 0, 1, 2];
+// Fundamental (1) e 1º harmônico/oitava acima (2) — o harmônico conta
+// como evidência mais fraca (dividido por ele mesmo), útil quando a
+// fundamental em si está fraca (corda grave captada por um microfone
+// fraco, por exemplo) mas o harmônico aparece bem.
+const HARMONICOS_BUSCADOS = [1, 2];
+
+function paraLinear(db) {
+  return Number.isFinite(db) && db > DB_MINIMO ? Math.pow(10, db / 20) : 0;
+}
 
 // Lê o espectro atual do AnalyserNode e devolve o "chroma": energia
 // relativa de cada uma das 12 classes de nota (C, C#, D...), normalizada
 // pra somar 1 — ignora em qual oitava o som está, só a classe.
+//
+// Em vez de despejar TODA energia do espectro no pitch-class mais próximo
+// de cada bin (o que fazia ruído de banda larga — como o ataque de uma
+// palhetada — contaminar os 12 bins quase por igual), procura, nota por
+// nota, só nas frequências que o violão realmente usa (ver
+// OITAVAS_BUSCADAS) e pega o PICO numa janelinha em volta de cada uma —
+// a mesma ideia do Chromagram do Adam Stark (chord_detector/
+// Chord-Detector-and-Chromagram), adaptada aqui sem depender de FFT em
+// C++/WASM, só reorganizando como já lemos o AnalyserNode nativo.
 export function extrairChroma(analyser, sampleRate) {
   const bins = new Float32Array(analyser.frequencyBinCount);
   analyser.getFloatFrequencyData(bins);
-
-  const chroma = new Array(12).fill(0);
   const freqPorBin = sampleRate / analyser.fftSize;
 
-  for (let i = 0; i < bins.length; i++) {
-    const freq = i * freqPorBin;
-    if (freq < FREQ_MIN || freq > FREQ_MAX) continue;
-    const db = bins[i];
-    if (!Number.isFinite(db) || db < DB_MINIMO) continue;
+  const chroma = new Array(12).fill(0);
 
-    const magnitude = Math.pow(10, db / 20); // dBFS -> escala linear
-    const nota = 69 + 12 * Math.log2(freq / 440); // nº MIDI fracionário (A4=69)
-    const classe = ((Math.round(nota) % 12) + 12) % 12;
-    chroma[classe] += magnitude;
+  for (let classe = 0; classe < 12; classe++) {
+    const freqClasse = NOTA_BASE_HZ * 2 ** (classe / 12);
+    let soma = 0;
+
+    for (const oitava of OITAVAS_BUSCADAS) {
+      for (const harmonico of HARMONICOS_BUSCADOS) {
+        const freqAlvo = freqClasse * 2 ** oitava * harmonico;
+        if (freqAlvo < FREQ_MIN || freqAlvo > FREQ_MAX) continue;
+
+        const binCentral = Math.round(freqAlvo / freqPorBin);
+        let pico = 0;
+        for (let d = -1; d <= 1; d++) {
+          const idx = binCentral + d;
+          if (idx >= 0 && idx < bins.length) pico = Math.max(pico, paraLinear(bins[idx]));
+        }
+        soma += pico / harmonico;
+      }
+    }
+
+    chroma[classe] = soma;
   }
 
   const total = chroma.reduce((a, b) => a + b, 0) || 1;
@@ -94,11 +129,25 @@ export function extrairChroma(analyser, sampleRate) {
 
 // Produto escalar entre chroma e template (ambos normalizados) — 1 é
 // combinação perfeita, 0 é nenhuma relação.
+// Quanto penalizar energia detectada FORA das notas do acorde candidato —
+// ideia do ChordDetector do Adam Stark (chord_detector/
+// Chord-Detector-and-Chromagram): ele pontua um acorde pelo tanto de
+// energia que "vaza" pras notas que não são dele (menos vazamento =
+// melhor candidato), em vez de só somar o que bate. Aqui mantemos a
+// pontuação "quanto maior, melhor" (pro resto do código continuar igual)
+// só subtraindo essa energia fora do acorde, em vez de inverter tudo pra
+// "quanto menor, melhor" como o original faz.
+const PESO_PENALIDADE_FORA_DO_ACORDE = 0.5;
+
 export function similaridadeChroma(chroma, template) {
   if (!template) return 0;
-  let soma = 0;
-  for (let i = 0; i < 12; i++) soma += chroma[i] * template[i];
-  return soma;
+  let dentro = 0;
+  let fora = 0;
+  for (let i = 0; i < 12; i++) {
+    if (template[i] > 0) dentro += chroma[i] * template[i];
+    else fora += chroma[i];
+  }
+  return dentro - PESO_PENALIDADE_FORA_DO_ACORDE * fora;
 }
 
 // A partir dos `blocos` do .cho (parseChordPro), monta a lista, em ordem,

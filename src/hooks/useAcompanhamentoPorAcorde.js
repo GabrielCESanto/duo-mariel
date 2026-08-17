@@ -6,6 +6,7 @@ import {
   proximaFraseComAcordeDiferente,
   similaridadeChroma,
 } from "../lib/chordDetect";
+import { detectarIdioma } from "../lib/detectarIdioma";
 import {
   criarReconhecedorDeVoz,
   pontuarSemelhancaTexto,
@@ -71,6 +72,7 @@ const SILENCIO_VOZ_PARA_ACORDE_MS = 2000;
 // `blocos` é o retorno de parseChordPro().
 export function useAcompanhamentoPorAcorde(blocos, { usarVoz = true, usarAcorde = false } = {}) {
   const frases = useMemo(() => construirFrases(blocos), [blocos]);
+  const idioma = useMemo(() => detectarIdioma(frases.map((f) => f.texto).join(" ")), [frases]);
 
   const [indice, setIndice] = useState(0);
   const [ouvindo, setOuvindo] = useState(false);
@@ -184,8 +186,21 @@ export function useAcompanhamentoPorAcorde(blocos, { usarVoz = true, usarAcorde 
         const ctx = new (window.AudioContext || window.webkitAudioContext)();
         const fonte = ctx.createMediaStreamSource(stream);
         const analyser = ctx.createAnalyser();
-        analyser.fftSize = 4096;
-        analyser.smoothingTimeConstant = 0.4;
+        // 8192 (em vez de 4096) dá bins mais finos nos graves — importante
+        // pra mirar certo nas frequências do violão (E2 a ~82Hz), que com
+        // menos resolução caem num bin muito largo. Mesmo valor que o
+        // Chromagram do Adam Stark usa por padrão (chord_detector).
+        analyser.fftSize = 8192;
+        // O ReChord (belovm96/chord-detection) usa um CRF por cima da rede
+        // neural pra suavizar a sequência de acordes prevista em vez de
+        // confiar em cada frame isolado — pesado demais pra replicar aqui
+        // (precisa de treino, GPU), mas o princípio (não decidir em cima
+        // de um instante só) dá pra pegar de graça: o próprio AnalyserNode
+        // já faz média móvel entre frames antes de a gente nem ler o
+        // espectro. Subi de 0,4 pra 0,6 pra amortecer melhor o ataque da
+        // palhetada (ruído de banda larga que dura só uma fração de
+        // segundo) sem deixar a resposta lenta demais.
+        analyser.smoothingTimeConstant = 0.6;
         fonte.connect(analyser);
 
         streamRef.current = stream;
@@ -196,6 +211,7 @@ export function useAcompanhamentoPorAcorde(blocos, { usarVoz = true, usarAcorde 
 
       if (usarVoz && reconhecimentoDeVozSuportado) {
         vozRef.current = criarReconhecedorDeVoz({
+          idioma,
           onTexto: (texto) => {
             setTextoOuvido(texto);
             avaliarVoz(texto);
@@ -236,6 +252,7 @@ export function useAcompanhamentoPorAcorde(blocos, { usarVoz = true, usarAcorde 
     ouvindo,
     similaridade,
     textoOuvido,
+    idioma,
     vozSuportada: reconhecimentoDeVozSuportado,
     erro,
     iniciar,

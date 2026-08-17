@@ -133,6 +133,7 @@ function Viewer({ id }) {
     ouvindo,
     similaridade,
     textoOuvido,
+    idioma,
     vozSuportada,
     erro,
     iniciar,
@@ -208,6 +209,11 @@ function Viewer({ id }) {
             />
             Acompanhar por voz (sinal principal — compara o que você canta com a letra)
           </label>
+          {usarVoz && (
+            <p className="text-cream-muted/60 text-xs pl-6">
+              idioma detectado pela letra: <span className="text-gold-300">{idioma}</span>
+            </p>
+          )}
           <label
             className={`flex items-center gap-2 text-xs ${
               ouvindo ? "text-cream-muted/50" : "text-cream-muted cursor-pointer"
