@@ -127,18 +127,22 @@ export function extrairChroma(analyser, sampleRate) {
   return chroma.map((v) => v / total);
 }
 
-// Produto escalar entre chroma e template (ambos normalizados) — 1 é
-// combinação perfeita, 0 é nenhuma relação.
 // Quanto penalizar energia detectada FORA das notas do acorde candidato —
 // ideia do ChordDetector do Adam Stark (chord_detector/
 // Chord-Detector-and-Chromagram): ele pontua um acorde pelo tanto de
 // energia que "vaza" pras notas que não são dele (menos vazamento =
-// melhor candidato), em vez de só somar o que bate. Aqui mantemos a
-// pontuação "quanto maior, melhor" (pro resto do código continuar igual)
-// só subtraindo essa energia fora do acorde, em vez de inverter tudo pra
-// "quanto menor, melhor" como o original faz.
+// melhor candidato), em vez de só somar o que bate.
 const PESO_PENALIDADE_FORA_DO_ACORDE = 0.5;
 
+// Fração de "quanto da energia dentro+fora do acorde está de fato dentro"
+// — vai de 0 (nada bate) a 1 (toda energia relevante está nas notas do
+// acorde). Testada primeiro como subtração direta (dentro - peso*fora) e
+// deu números sem sentido pra calibrar: acorde tocado certinho (testado
+// com "O Sol", Jota Quest — notas limpas e sustentadas) ficava perto de
+// 0% e o errado ia a -40%. A proporção resolve isso mantendo a mesma
+// discriminação (a diferença real, em quanto da energia cai dentro vs
+// fora do acorde, continua enorme) só com uma escala 0-100% que dá pra
+// calibrar e mostrar na tela sem ficar negativo.
 export function similaridadeChroma(chroma, template) {
   if (!template) return 0;
   let dentro = 0;
@@ -147,7 +151,7 @@ export function similaridadeChroma(chroma, template) {
     if (template[i] > 0) dentro += chroma[i] * template[i];
     else fora += chroma[i];
   }
-  return dentro - PESO_PENALIDADE_FORA_DO_ACORDE * fora;
+  return dentro / (dentro + PESO_PENALIDADE_FORA_DO_ACORDE * fora || 1);
 }
 
 // A partir dos `blocos` do .cho (parseChordPro), monta a lista, em ordem,

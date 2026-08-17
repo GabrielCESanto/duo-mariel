@@ -21,9 +21,15 @@ const LIMIAR_VOZ = 0.35;
 // Só olha as próximas N frases a partir da atual — testado com uma busca
 // bem mais ampla (25 frases à frente) e ficou pior: matches por
 // coincidência lá na frente, e mais lento pra recalcular a cada frase
-// ouvida. Uma janela pequena (a próxima linha, e mais umas 2-4 depois)
-// já cobre o caso real (pular uma repetição perdida) sem esse ruído.
-const JANELA_VOZ = 5;
+// ouvida. Testado em 5 e pedido pra dobrar depois de mais uso real.
+const JANELA_VOZ = 10;
+// Quando confirma que uma linha foi cantada, mostra a de baixo (não a
+// que acabou de confirmar) — o reconhecimento de voz tem uma latência
+// inerente (leva um tempinho pra transcrever), então no momento em que a
+// confirmação chega, quem está cantando já está uma linha à frente na
+// prática. Sem essa antecipação, a tela sempre parecia mostrar a linha
+// que "já passou", em vez da que precisa ser cantada agora.
+const ANTECIPACAO_LINHAS_VOZ = 1;
 // O Chrome, no modo "continuous", às vezes demora muito pra fechar uma
 // frase como definitiva — enquanto isso, o resultado provisório vai
 // crescendo (podendo acumular quase uma estrofe inteira) antes de dar um
@@ -34,16 +40,18 @@ const JANELA_VOZ = 5;
 const PALAVRAS_RECENTES_VOZ = 5;
 
 // Só avança por acorde quando o próximo bate MELHOR que o atual por essa
-// margem — evita trocar de linha por ruído/harmônico parecido.
-const MARGEM_ACORDE = 0.1;
+// margem — evita trocar de linha por ruído/harmônico parecido. Testado
+// real ("O Sol", Jota Quest) mostrou uma diferença grande entre certo e
+// errado, então dá pra pedir uma margem mais folgada que 0,1 sem medo.
+const MARGEM_ACORDE = 0.15;
 // E só depois de bater assim por esse tempo seguido — evita disparo em
 // falso durante a troca de dedo/mão de um acorde pro outro.
 const TEMPO_ESTAVEL_ACORDE_MS = 220;
-// Abaixo disso, a semelhança é baixa demais pra confiar. Calibrado com
-// teste real: comparar áudio de instrumento contra um "molde" puro de
-// acorde raramente passa de ~40-50% mesmo acertando — nos testes, acorde
-// certo ficou em 35-40%, errado em ~15%.
-const SIMILARIDADE_MINIMA_ACORDE = 0.25;
+// Abaixo disso, a semelhança é baixa demais pra confiar. Recalibrado
+// depois de trocar a fórmula de similaridadeChroma (ver comentário lá) —
+// nesse teste real, acorde certo por volta de ~55%, errado por volta de
+// ~11%. 0,3 fica confortavelmente entre os dois.
+const SIMILARIDADE_MINIMA_ACORDE = 0.3;
 // Enquanto a voz estiver ativa e tiver ouvido algo há pouco tempo, o
 // acorde não deve tentar avançar sozinho — testado com os dois ligados
 // juntos e, tocando o ritmo (não uma nota sustentada), o acorde errava
@@ -124,7 +132,12 @@ export function useAcompanhamentoPorAcorde(blocos, { usarVoz = true, usarAcorde 
       }
     }
 
-    if (melhorIndice > indiceRef.current) mudarIndice(melhorIndice);
+    // Só conta como progresso de verdade se o match achado for além da
+    // posição atual — aí sim pula, mas pra ANTECIPACAO_LINHAS_VOZ à frente
+    // do que foi confirmado (ver comentário da constante)
+    if (melhorIndice > indiceRef.current) {
+      mudarIndice(melhorIndice + ANTECIPACAO_LINHAS_VOZ);
+    }
   };
 
   const lacoAcorde = () => {
