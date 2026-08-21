@@ -2179,6 +2179,7 @@ function BotaoConfirma({ rotulo, ok, onClick }) {
 
 const FORM_EVENTO_VAZIO = {
   titulo: "",
+  subtitulo: "",
   local: "",
   data: "",
   hora: "",
@@ -2263,6 +2264,7 @@ function GerenciarAgenda() {
     e.preventDefault();
     const registro = {
       titulo: form.titulo.trim(),
+      subtitulo: form.subtitulo.trim() || null,
       local: form.local.trim() || null,
       data: form.data,
       hora: /^\d{2}:\d{2}$/.test(form.hora) ? form.hora : null,
@@ -2295,6 +2297,7 @@ function GerenciarAgenda() {
     setEditandoId(ev.id);
     setForm({
       titulo: ev.titulo,
+      subtitulo: ev.subtitulo ?? "",
       local: ev.local ?? "",
       data: ev.data,
       hora: ev.hora ? ev.hora.slice(0, 5) : "",
@@ -2338,6 +2341,10 @@ function GerenciarAgenda() {
         <h2 className="section-title text-sm mb-4">
           {editandoId ? "Editar show" : "Adicionar show"}
         </h2>
+        <p className="text-xs text-cream-muted -mt-2 mb-4">
+          Título, subtítulo e detalhes preenchem o card padrão da Agenda —
+          mesmo design pra todos os shows, só o texto muda.
+        </p>
 
         <div className="grid gap-3 sm:grid-cols-2">
           <input
@@ -2346,6 +2353,12 @@ function GerenciarAgenda() {
             value={form.titulo}
             onChange={(e) => setForm({ ...form, titulo: e.target.value })}
             required
+          />
+          <input
+            className="input-noir"
+            placeholder="Subtítulo (ex.: Bossa & MPB ao vivo)"
+            value={form.subtitulo}
+            onChange={(e) => setForm({ ...form, subtitulo: e.target.value })}
           />
           <input
             className="input-noir"
@@ -2387,7 +2400,7 @@ function GerenciarAgenda() {
 
         <input
           className="input-noir mt-3"
-          placeholder="Observação (ex.: entrada gratuita, evento privado...)"
+          placeholder="Detalhes (ex.: entrada gratuita, evento privado...)"
           value={form.observacao}
           onChange={(e) => setForm({ ...form, observacao: e.target.value })}
         />
@@ -2449,6 +2462,9 @@ function GerenciarAgenda() {
                     <p className={`truncate ${passado ? "text-cream-muted line-through" : "text-cream"}`}>
                       {ev.titulo}
                     </p>
+                    {ev.subtitulo && (
+                      <p className="text-gold-300/80 text-xs truncate">{ev.subtitulo}</p>
+                    )}
                     <p className="text-cream-muted text-sm truncate">
                       {formatarDataCurta(ev.data)}
                       {ev.hora ? ` • ${ev.hora.slice(0, 5)}` : ""}

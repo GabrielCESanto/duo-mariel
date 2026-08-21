@@ -145,6 +145,11 @@ create table if not exists public.eventos (
 alter table public.eventos add column if not exists cache text;
 alter table public.eventos add column if not exists duracao text;
 
+-- Subtítulo do card padrão da Agenda (ver Agenda.jsx) — título, subtítulo e
+-- observação (usada como "detalhes") são os três textos editáveis que
+-- preenchem o mesmo template visual em todos os shows.
+alter table public.eventos add column if not exists subtitulo text;
+
 -- Senha da playlist pública desse evento (ver seção "PLAYLIST DE EVENTO"
 -- mais abaixo) — cada show tem a sua própria, em vez de uma senha única
 -- compartilhada entre todos. Null/vazia = playlist desativada pra esse
@@ -164,7 +169,7 @@ create policy "eventos: leitura publica"
   using (true);
 
 revoke select on table public.eventos from anon;
-grant select (id, titulo, local, data, hora, observacao)
+grant select (id, titulo, subtitulo, local, data, hora, observacao)
   on table public.eventos to anon;
 
 drop policy if exists "eventos: insert autenticado" on public.eventos;
