@@ -3534,6 +3534,14 @@ function AbaOcultar() {
 // Roteiros de show com ordem definida — só o admin vê (não é uma
 // funcionalidade pública). musicas_ids é um array ordenado: a posição no
 // array é a ordem de execução.
+// Um item da ordem é { musica_id } (referência ao repertório) ou
+// { extra_id, nome, artista, estilo } (música avulsa, só desta playlist).
+// Playlists antigas só têm a coluna musicas_ids (array de uuid) — convertida
+// aqui na hora da leitura; ao salvar qualquer mudança, a playlist já passa a
+// gravar no formato novo (itens).
+const itensDaPlaylist = (p) =>
+  p.itens?.length ? p.itens : (p.musicas_ids ?? []).map((id) => ({ musica_id: id }));
+
 function AbaPlaylists() {
   const [musicas, setMusicas] = useState([]);
   const [playlists, setPlaylists] = useState([]);
@@ -3543,6 +3551,12 @@ function AbaPlaylists() {
   const [novoNome, setNovoNome] = useState("");
   const [buscaAdicionar, setBuscaAdicionar] = useState("");
   const [nomeEditando, setNomeEditando] = useState("");
+  // O painel "Adicionar música" fica escondido até o admin clicar no botão —
+  // a Ordem é o que se quer ver de cara ao abrir uma playlist
+  const [mostrarAdicionar, setMostrarAdicionar] = useState(false);
+  // Abre o modal de busca no iTunes pra cadastrar uma música avulsa
+  // (fora do repertório) direto na ordem desta playlist
+  const [adicionandoExtra, setAdicionandoExtra] = useState(false);
   // Trava mover/adicionar/remover enquanto uma dessas ações ainda está
   // salvando — sem isso, clicar duas vezes rápido (ex.: ↑ ↑) faz a segunda
   // chamada partir do mesmo estado "antigo" da primeira (fechado no
@@ -3567,11 +3581,26 @@ function AbaPlaylists() {
 
   const musicaPorId = new Map(musicas.map((m) => [m.id, m]));
   const playlistAberta = playlists.find((p) => p.id === abertaId) ?? null;
+  const itensAbertos = playlistAberta ? itensDaPlaylist(playlistAberta) : [];
 
   const abrirPlaylist = (p) => {
     setAbertaId(p.id);
     setNomeEditando(p.nome);
     setBuscaAdicionar("");
+    setMostrarAdicionar(false);
+  };
+
+  // Nome/artista pra exibir e pra tocar o trecho no iTunes — resolve pelo
+  // repertório quando o item referencia uma música cadastrada, ou usa os
+  // dados salvos direto no item quando é avulsa (fora do repertório)
+  const infoDoItem = (item) => {
+    if (item.musica_id) {
+      const m = musicaPorId.get(item.musica_id);
+      return m
+        ? { nome: m.nome, artista: m.artista, extra: false }
+        : { nome: "(música removida do repertório)", artista: "", extra: false };
+    }
+    return { nome: item.nome, artista: item.artista, extra: true };
   };
 
   const criarPlaylist = async (e) => {
@@ -3609,18 +3638,18 @@ function AbaPlaylists() {
     carregar();
   };
 
-  // Persiste a nova ordem (ou lista) de músicas — atualiza o estado local
-  // na hora (otimista) pra reordenar parecer instantâneo, e recarrega tudo
-  // se o servidor recusar, pra não deixar a tela mentindo sobre o que foi
+  // Persiste a nova ordem (ou lista) de itens — atualiza o estado local na
+  // hora (otimista) pra reordenar parecer instantâneo, e recarrega tudo se
+  // o servidor recusar, pra não deixar a tela mentindo sobre o que foi
   // salvo de verdade
-  const salvarMusicas = async (playlistId, novaLista) => {
+  const salvarItens = async (playlistId, novosItens) => {
     setSalvandoOrdem(true);
     setPlaylists((ps) =>
-      ps.map((p) => (p.id === playlistId ? { ...p, musicas_ids: novaLista } : p))
+      ps.map((p) => (p.id === playlistId ? { ...p, itens: novosItens } : p))
     );
     const { error } = await supabase
       .from("playlists")
-      .update({ musicas_ids: novaLista })
+      .update({ itens: novosItens })
       .eq("id", playlistId);
     if (error) {
       console.error(error);
@@ -3646,31 +3675,50 @@ function AbaPlaylists() {
   };
 
   const adicionarMusica = (musicaId) => {
-    if (!playlistAberta || salvandoOrdem || playlistAberta.musicas_ids.includes(musicaId)) return;
-    salvarMusicas(playlistAberta.id, [...playlistAberta.musicas_ids, musicaId]);
+    if (!playlistAberta || salvandoOrdem) return;
+    if (itensAbertos.some((it) => it.musica_id === musicaId)) return;
+    salvarItens(playlistAberta.id, [...itensAbertos, { musica_id: musicaId }]);
   };
 
-  const removerMusica = (musicaId) => {
+  // Cadastra a música avulsa (dados vindos do modal de busca no iTunes,
+  // digitados manualmente ou preenchidos pela sugestão escolhida) direto na
+  // ordem desta playlist — nunca na tabela musicas, ela não entra pro
+  // repertório
+  const confirmarAdicionarExtra = async ({ nome, artista, estilo }) => {
+    if (!playlistAberta) return;
+    const item = {
+      extra_id: crypto.randomUUID(),
+      nome,
+      artista,
+      estilo: estilo || null,
+    };
+    await salvarItens(playlistAberta.id, [...itensAbertos, item]);
+    setAdicionandoExtra(false);
+    setStatus(`✅ "${nome}" adicionada (fora do repertório)!`);
+    setTimeout(() => setStatus(""), 2500);
+  };
+
+  const removerItem = (indice) => {
     if (!playlistAberta || salvandoOrdem) return;
-    salvarMusicas(
+    salvarItens(
       playlistAberta.id,
-      playlistAberta.musicas_ids.filter((id) => id !== musicaId)
+      itensAbertos.filter((_, i) => i !== indice)
     );
   };
 
-  const moverMusica = (indice, direcao) => {
+  const moverItem = (indice, direcao) => {
     if (!playlistAberta || salvandoOrdem) return;
     const alvo = indice + direcao;
-    const lista = playlistAberta.musicas_ids;
-    if (alvo < 0 || alvo >= lista.length) return;
-    const nova = [...lista];
+    if (alvo < 0 || alvo >= itensAbertos.length) return;
+    const nova = [...itensAbertos];
     [nova[indice], nova[alvo]] = [nova[alvo], nova[indice]];
-    salvarMusicas(playlistAberta.id, nova);
+    salvarItens(playlistAberta.id, nova);
   };
 
+  const idsNaPlaylist = new Set(itensAbertos.filter((it) => it.musica_id).map((it) => it.musica_id));
   const musicasDisponiveis = playlistAberta
     ? musicas.filter((m) => {
-        if (playlistAberta.musicas_ids.includes(m.id)) return false;
+        if (idsNaPlaylist.has(m.id)) return false;
         const q = buscaAdicionar.trim().toLowerCase();
         if (!q) return true;
         return `${m.nome} ${m.artista}`.toLowerCase().includes(q);
@@ -3713,7 +3761,7 @@ function AbaPlaylists() {
                 >
                   <p className="truncate">{p.nome}</p>
                   <p className="text-cream-muted text-xs mt-0.5">
-                    {p.musicas_ids?.length ?? 0} música(s)
+                    {itensDaPlaylist(p).length} música(s)
                   </p>
                 </button>
                 <div className="flex items-center gap-2 shrink-0">
@@ -3754,71 +3802,99 @@ function AbaPlaylists() {
             </button>
           </div>
 
-          <div className="grid gap-5 sm:grid-cols-2">
-            {/* Ordem da playlist */}
-            <div>
-              <p className="text-xs uppercase tracking-wider text-cream-muted mb-2">
-                Ordem ({playlistAberta.musicas_ids.length})
-              </p>
-              {playlistAberta.musicas_ids.length === 0 ? (
-                <p className="text-cream-muted text-sm border border-noir-800 rounded-xl p-4">
-                  Nenhuma música ainda — adicione ao lado.
-                </p>
-              ) : (
-                <ol className="border border-noir-800 rounded-xl divide-y divide-noir-800 max-h-96 overflow-y-auto">
-                  {playlistAberta.musicas_ids.map((id, i) => {
-                    const m = musicaPorId.get(id);
-                    return (
-                      <li key={id} className="flex items-center gap-2 px-3 py-2">
-                        <span className="text-cream-muted text-xs w-5 shrink-0 text-right">
-                          {i + 1}.
-                        </span>
-                        <span className="min-w-0 flex-1 truncate text-sm text-cream">
-                          {m ? `${m.nome} — ${m.artista}` : "(música removida do repertório)"}
-                        </span>
-                        <button
-                          onClick={() => moverMusica(i, -1)}
-                          disabled={i === 0 || salvandoOrdem}
-                          aria-label="Mover para cima"
-                          className="shrink-0 w-7 h-7 rounded-md border border-noir-700 text-cream-muted text-xs hover:text-gold-300 hover:border-gold-600 transition disabled:opacity-30 disabled:pointer-events-none"
-                        >
-                          ↑
-                        </button>
-                        <button
-                          onClick={() => moverMusica(i, 1)}
-                          disabled={i === playlistAberta.musicas_ids.length - 1 || salvandoOrdem}
-                          aria-label="Mover para baixo"
-                          className="shrink-0 w-7 h-7 rounded-md border border-noir-700 text-cream-muted text-xs hover:text-gold-300 hover:border-gold-600 transition disabled:opacity-30 disabled:pointer-events-none"
-                        >
-                          ↓
-                        </button>
-                        <button
-                          onClick={() => removerMusica(id)}
-                          disabled={salvandoOrdem}
-                          aria-label="Remover da playlist"
-                          className="shrink-0 w-7 h-7 rounded-md border border-noir-700 text-cream-muted text-xs hover:text-red-400 hover:border-red-900 transition disabled:opacity-30 disabled:pointer-events-none"
-                        >
-                          ✕
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ol>
-              )}
-            </div>
+          {/* Ordem da playlist */}
+          <div className="flex items-center justify-between gap-3 mb-2">
+            <p className="text-xs uppercase tracking-wider text-cream-muted">
+              Ordem ({itensAbertos.length})
+            </p>
+            <button
+              onClick={() => setMostrarAdicionar((v) => !v)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs shrink-0 btn-gold"
+            >
+              <Icone nome="mais" className="w-3.5 h-3.5" />
+              Adicionar música
+            </button>
+          </div>
 
-            {/* Adicionar músicas do repertório */}
-            <div>
-              <p className="text-xs uppercase tracking-wider text-cream-muted mb-2">
-                Adicionar do repertório
-              </p>
+          {itensAbertos.length === 0 ? (
+            <p className="text-cream-muted text-sm border border-noir-800 rounded-xl p-4">
+              Nenhuma música ainda — clique em "Adicionar música".
+            </p>
+          ) : (
+            <ol className="border border-noir-800 rounded-xl divide-y divide-noir-800 max-h-96 overflow-y-auto">
+              {itensAbertos.map((item, i) => {
+                const info = infoDoItem(item);
+                return (
+                  <li
+                    key={item.musica_id ?? item.extra_id}
+                    className="flex items-center gap-2 px-3 py-2"
+                  >
+                    <span className="text-cream-muted text-xs w-5 shrink-0 text-right">
+                      {i + 1}.
+                    </span>
+                    <BotaoOuvir nome={info.nome} artista={info.artista} />
+                    <span className="min-w-0 flex-1 truncate text-sm text-cream">
+                      {info.artista ? `${info.nome} — ${info.artista}` : info.nome}
+                      {info.extra && (
+                        <span
+                          title="Música avulsa — não está no repertório"
+                          className="ml-2 text-[10px] uppercase tracking-wider text-gold-300 border border-gold-700 rounded-full px-2 py-0.5"
+                        >
+                          fora do repertório
+                        </span>
+                      )}
+                    </span>
+                    <button
+                      onClick={() => moverItem(i, -1)}
+                      disabled={i === 0 || salvandoOrdem}
+                      aria-label="Mover para cima"
+                      className="shrink-0 w-7 h-7 rounded-md border border-noir-700 text-cream-muted text-xs hover:text-gold-300 hover:border-gold-600 transition disabled:opacity-30 disabled:pointer-events-none"
+                    >
+                      ↑
+                    </button>
+                    <button
+                      onClick={() => moverItem(i, 1)}
+                      disabled={i === itensAbertos.length - 1 || salvandoOrdem}
+                      aria-label="Mover para baixo"
+                      className="shrink-0 w-7 h-7 rounded-md border border-noir-700 text-cream-muted text-xs hover:text-gold-300 hover:border-gold-600 transition disabled:opacity-30 disabled:pointer-events-none"
+                    >
+                      ↓
+                    </button>
+                    <button
+                      onClick={() => removerItem(i)}
+                      disabled={salvandoOrdem}
+                      aria-label="Remover da playlist"
+                      className="shrink-0 w-7 h-7 rounded-md border border-noir-700 text-cream-muted text-xs hover:text-red-400 hover:border-red-900 transition disabled:opacity-30 disabled:pointer-events-none"
+                    >
+                      ✕
+                    </button>
+                  </li>
+                );
+              })}
+            </ol>
+          )}
+
+          {/* Painel "Adicionar música" — só aparece depois de clicar no botão */}
+          {mostrarAdicionar && (
+            <div className="mt-5 border border-noir-800 rounded-xl p-4 bg-noir-950/40">
+              <div className="flex items-center justify-between gap-3 mb-2">
+                <p className="text-xs uppercase tracking-wider text-cream-muted">
+                  Adicionar do repertório
+                </p>
+                <button
+                  onClick={() => setAdicionandoExtra(true)}
+                  className="shrink-0 text-xs text-gold-300 hover:underline"
+                >
+                  Não está no repertório? Adicionar avulsa
+                </button>
+              </div>
               <input
                 className="input-noir text-sm mb-2"
                 placeholder="Buscar música ou artista..."
                 value={buscaAdicionar}
                 onChange={(e) => setBuscaAdicionar(e.target.value)}
               />
-              <div className="max-h-96 overflow-y-auto border border-noir-800 rounded-xl divide-y divide-noir-800">
+              <div className="max-h-72 overflow-y-auto border border-noir-800 rounded-xl divide-y divide-noir-800">
                 {musicasDisponiveis.map((m) => (
                   <button
                     key={m.id}
@@ -3839,8 +3915,19 @@ function AbaPlaylists() {
                 )}
               </div>
             </div>
-          </div>
+          )}
         </div>
+      )}
+
+      {adicionandoExtra && (
+        <ModalBuscaItunes
+          nomeInicial=""
+          titulo="Adicionar música fora do repertório"
+          descricao="Essa música entra só nesta playlist — não é cadastrada no repertório. Busque no iTunes pra preencher automático, ou digite manualmente."
+          textoConfirmar="Adicionar à playlist"
+          onFechar={() => setAdicionandoExtra(false)}
+          onConfirmar={confirmarAdicionarExtra}
+        />
       )}
     </div>
   );
