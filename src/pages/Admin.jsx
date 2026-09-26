@@ -1011,7 +1011,7 @@ function GerenciarMusicas() {
         musica_id: m.id,
         rotulo: rotulo.trim() || `Versão ${versoesAtuais.length + 1}`,
         cifra_path: path,
-        cifra_paginas: totalPaginas || null,
+        cifra_paginas: totalPaginas,
         cifra_versao: versao,
         cifra_cho: cifraCho,
         ordem: versoesAtuais.length,
