@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import * as pdfjs from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { supabase, supabaseConfigured } from "../lib/supabase";
@@ -142,10 +142,30 @@ function CifraChoView({ blocos }) {
   );
 }
 
+// Pra onde o botão "Voltar" leva, e o que buscar pra montar Anterior/Próxima
+// — depende de onde a tela da cifra foi aberta (aba Cifras, Revisão, ou uma
+// playlist/evento específica), levado na URL via ?voltar=
+const destinoVoltar = (voltar) => {
+  if (voltar === "revisao") return "/admin?aba=revisao";
+  if (voltar?.startsWith("playlist:")) {
+    return `/admin?aba=playlists&abrir=${voltar}`;
+  }
+  if (voltar?.startsWith("evento:")) {
+    return `/admin?aba=playlists&abrir=${voltar}`;
+  }
+  return "/admin?aba=cifras";
+};
+
 export default function Cifra() {
   const { id } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const voltar = searchParams.get("voltar");
   const [sessao, setSessao] = useState(undefined); // undefined = verificando
   const [musica, setMusica] = useState(null);
+  // Versões da cifra desta música (uma música pode ter mais de uma — ex.
+  // "Tom original", "Ao vivo") e qual delas está selecionada
+  const [versoes, setVersoes] = useState([]);
+  const [versaoId, setVersaoId] = useState(null);
   // Painel de tom/capotraste/edição do texto — só existe pra cifra em .cho
   const [painelAberto, setPainelAberto] = useState(false);
   const [transposicao, setTransposicao] = useState(0); // semitons, a partir do texto salvo
@@ -173,6 +193,10 @@ export default function Cifra() {
   // Mostra "(180% • 15px/s)" ao lado do título por 5s sempre que o usuário
   // mexe no zoom ou na velocidade, depois some sozinho
   const [mostrarInfoRapida, setMostrarInfoRapida] = useState(false);
+  // Barra de velocidade (eixo −/+ com uma bolinha) que aparece enquanto o
+  // usuário arrasta 1 dedo pra ajustar a velocidade, e some sozinha depois
+  // de alguns segundos parado (mesmo sem soltar o dedo)
+  const [mostrarBarraArraste, setMostrarBarraArraste] = useState(false);
   const [progresso, setProgresso] = useState({ atual: 0, total: 0 }); // pra "Renderizando página X de Y"
 
   const scrollRef = useRef(null);
@@ -189,7 +213,15 @@ export default function Cifra() {
   // velocidade — só usado na visão de texto (no PDF/imagem, 1 dedo já é o
   // gesto de "arrastar pra ver o zoom", então não disputa com ele aqui)
   const arrasteVelocidadeRef = useRef(null);
+  const barraArrasteTimerRef = useRef(null); // some a barra ~2.5s depois da última mudança
   const montadoRef = useRef(true); // false assim que a tela é desmontada (ex.: botão Voltar)
+
+  // Mostra a barra de velocidade e reinicia o contador de 2.5s pra escondê-la
+  const dispararBarraArraste = () => {
+    setMostrarBarraArraste(true);
+    clearTimeout(barraArrasteTimerRef.current);
+    barraArrasteTimerRef.current = setTimeout(() => setMostrarBarraArraste(false), 2500);
+  };
 
   rodandoRef.current = rodando;
   renderizandoRef.current = renderizando;
@@ -203,6 +235,7 @@ export default function Cifra() {
   useEffect(() => {
     return () => {
       montadoRef.current = false;
+      clearTimeout(barraArrasteTimerRef.current);
     };
   }, []);
 
@@ -388,6 +421,7 @@ export default function Cifra() {
   };
 
   // --- Carrega música + PDF ---
+  const versaoQuery = searchParams.get("versao");
   useEffect(() => {
     if (!sessao) return;
     let cancelado = false;
@@ -436,11 +470,18 @@ export default function Cifra() {
     };
 
     (async () => {
-      const { data: m, error } = await supabase
-        .from("musicas")
-        .select("id, nome, artista, cifra_path, cifra_paginas, cifra_versao, cifra_cho, favorito")
-        .eq("id", id)
-        .single();
+      const [{ data: m, error }, { data: vs, error: erroVersoes }] = await Promise.all([
+        supabase
+          .from("musicas")
+          .select("id, nome, artista, favorito, cifra_versao_padrao_id")
+          .eq("id", id)
+          .single(),
+        supabase
+          .from("cifra_versoes")
+          .select("id, rotulo, cifra_path, cifra_paginas, cifra_versao, cifra_cho")
+          .eq("musica_id", id)
+          .order("ordem", { ascending: true }),
+      ]);
 
       if (cancelado) return;
       if (error || !m) {
@@ -448,12 +489,11 @@ export default function Cifra() {
         return;
       }
 
-      // A música em revisão manda uma entrada pra "sugestoes" (aba Aprender),
-      // junto com as demais — não é mais um campo isolado na própria música
+      // A música em revisão manda uma entrada pra "sugestoes" (aba Revisão)
       supabase
         .from("sugestoes")
         .select("id")
-        .eq("musica", m.nome)
+        .eq("musica_id", m.id)
         .eq("origem", "revisao")
         .limit(1)
         .maybeSingle()
@@ -461,32 +501,63 @@ export default function Cifra() {
           if (!cancelado) setRevisaoId(rev?.id ?? null);
         });
 
-      if (!m.cifra_path && !m.cifra_cho) {
-        setErro("Essa música ainda não tem cifra. Envie o PDF na aba Músicas.");
-        setMusica(m);
+      setMusica(m);
+      const lista = erroVersoes ? [] : vs ?? [];
+      setVersoes(lista);
+
+      if (lista.length === 0) {
+        setErro(
+          "Essa música ainda não tem cifra. Envie o PDF na aba Músicas, ou crie uma versão em texto aqui mesmo (botão \"+ Versão\" acima)."
+        );
         return;
       }
-      setMusica(m);
 
-      if (m.cifra_cho) {
+      // A versão escolhida vem da URL (?versao=), senão a padrão da música,
+      // senão a primeira da lista
+      const pedida = versaoQuery;
+      const escolhida =
+        lista.find((v) => v.id === pedida) ??
+        lista.find((v) => v.id === m.cifra_versao_padrao_id) ??
+        lista[0];
+      setVersaoId(escolhida.id);
+
+      // Objeto "achatado" com a identidade da música + os campos de cifra da
+      // versão escolhida — mostrarImagensProntas/carregarViaPdf só precisam
+      // disso (o nome de arquivo das imagens já usa o id da MÚSICA, não da
+      // versão, então continua único entre versões pelo timestamp cifra_versao)
+      const alvo = {
+        id: m.id,
+        nome: m.nome,
+        cifra_path: escolhida.cifra_path,
+        cifra_paginas: escolhida.cifra_paginas,
+        cifra_versao: escolhida.cifra_versao,
+        cifra_cho: escolhida.cifra_cho,
+      };
+
+      if (!alvo.cifra_path && !alvo.cifra_cho) {
+        setErro("Essa versão ainda não tem cifra enviada.");
+        return;
+      }
+
+      if (alvo.cifra_cho) {
         // Cifra em ChordPro: não tem PDF pra renderizar (o texto é
-        // parseado direto no corpo do componente, a partir de musica.cifra_cho)
+        // parseado direto no corpo do componente, a partir da versão ativa)
         setRenderizando(false);
         return;
       }
 
-      if (m.cifra_paginas > 0) {
+      if (alvo.cifra_paginas > 0) {
         // Cifra já tem as páginas convertidas em imagem (geradas no upload,
         // na aba Músicas) — abre quase instantâneo, sem processar PDF
         // nenhum neste aparelho. Se alguma imagem estiver quebrada, cai
         // pro PDF direto em vez de deixar a tela vazia.
-        mostrarImagensProntas(m, () => {
-          if (!cancelado) carregarViaPdf(m);
+        mostrarImagensProntas(alvo, () => {
+          if (!cancelado) carregarViaPdf(alvo);
         });
         return;
       }
 
-      await carregarViaPdf(m);
+      await carregarViaPdf(alvo);
     })();
 
     return () => {
@@ -499,7 +570,50 @@ export default function Cifra() {
       docRef.current = null;
       limparPaginas(containerAtual);
     };
-  }, [sessao, id, tentativa]);
+  }, [sessao, id, tentativa, versaoQuery]);
+
+  // --- Anterior/Próxima: quando a cifra foi aberta a partir de uma playlist
+  // ou de um evento (?voltar=playlist:<id> / evento:<id>), busca a sequência
+  // de músicas dessa playlist/evento pra saber quem vem antes/depois ---
+  const [navItens, setNavItens] = useState(null); // ids em ordem, ou null quando não se aplica
+  useEffect(() => {
+    let cancelado = false;
+    const [tipo, alvoId] = (voltar ?? "").split(":");
+    if (tipo === "playlist" && alvoId) {
+      supabase
+        .from("playlists")
+        .select("itens")
+        .eq("id", alvoId)
+        .single()
+        .then(({ data, error }) => {
+          if (cancelado || error) return;
+          setNavItens((data.itens ?? []).map((it) => it.musica_id).filter(Boolean));
+        });
+    } else if (tipo === "evento" && alvoId) {
+      supabase
+        .from("pedidos_evento")
+        .select("musica_id")
+        .eq("evento_id", alvoId)
+        .order("ordem", { ascending: true, nullsFirst: false })
+        .order("created_at", { ascending: true })
+        .then(({ data, error }) => {
+          if (cancelado || error) return;
+          setNavItens((data ?? []).map((it) => it.musica_id).filter(Boolean));
+        });
+    } else {
+      setNavItens(null);
+    }
+    return () => {
+      cancelado = true;
+    };
+  }, [voltar]);
+
+  const posicaoNav = navItens ? navItens.indexOf(id) : -1;
+  const idAnterior = posicaoNav > 0 ? navItens[posicaoNav - 1] : null;
+  const idProximo =
+    posicaoNav !== -1 && posicaoNav < (navItens?.length ?? 0) - 1
+      ? navItens[posicaoNav + 1]
+      : null;
 
   // --- Zoom mudou → ajusta a velocidade proporcionalmente (com um pequeno
   // atraso pra não acumular erro de arredondamento a cada frame de um
@@ -657,8 +771,8 @@ export default function Cifra() {
     }
   };
 
-  // --- Em revisão (ícone de olho) — manda a música pra aba Aprender, junto
-  // com as demais sugestões, até alguém marcar como revisada por lá ---
+  // --- Em revisão (ícone de olho) — manda a música pra aba Revisão, até
+  // alguém marcar como revisada por lá ---
   const alternarRevisao = async () => {
     if (!musica) return;
     if (revisaoId) {
@@ -673,7 +787,13 @@ export default function Cifra() {
     }
     const { data, error } = await supabase
       .from("sugestoes")
-      .insert({ musica: musica.nome, artista: musica.artista, origem: "revisao", para: "Ambos" })
+      .insert({
+        musica: musica.nome,
+        artista: musica.artista,
+        musica_id: musica.id,
+        origem: "revisao",
+        para: "Ambos",
+      })
       .select("id")
       .single();
     if (error) {
@@ -683,26 +803,103 @@ export default function Cifra() {
     setRevisaoId(data.id);
   };
 
-  // --- Tom/capotraste/edição do texto (só existe pra cifra em .cho) ---
+  // --- Versão selecionada, tom/capotraste/edição do texto (só existe pra
+  // cifra em .cho) ---
+  const versaoAtual = versoes.find((v) => v.id === versaoId) ?? null;
   // textoExibido é sempre calculado a partir do texto SALVO (nunca de uma
   // transposição anterior) — evita transpor em cima de transposição já
   // aplicada se o usuário clicar +/- várias vezes
-  const textoBase = musica?.cifra_cho ?? null;
+  const textoBase = versaoAtual?.cifra_cho ?? null;
   const textoExibido = transposicao ? transporTexto(textoBase, transposicao) : textoBase;
   const choBlocos = textoExibido ? parseChordPro(textoExibido).blocos : null;
   const capoAtual = extrairCapoDoTexto(textoBase);
 
+  const trocarVersao = (novoId) => {
+    setSearchParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        p.set("versao", novoId);
+        return p;
+      },
+      { replace: true }
+    );
+  };
+
+  // Depois de criar uma versão nova, ela só existe de verdade no estado
+  // (versaoAtual) quando o efeito de carregamento (abaixo) terminar de
+  // buscá-la do banco — essa flag pede pra abrir o modo de edição assim
+  // que isso acontecer, em vez de tentar abrir na hora (que seria
+  // desfeito pelo próprio efeito, que reseta modoEdicao ao trocar de versão)
+  const abrirEdicaoAoTrocarRef = useRef(false);
+  useEffect(() => {
+    if (abrirEdicaoAoTrocarRef.current && versaoAtual) {
+      abrirEdicaoAoTrocarRef.current = false;
+      abrirEdicao();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [versaoId]);
+
+  // Cria uma versão nova da cifra — opcionalmente copiando o texto da
+  // versão atual (já com tom/capo aplicados) como ponto de partida pra
+  // ajustar, ou em branco
+  const criarNovaVersao = async () => {
+    if (!musica) return;
+    const rotulo = window.prompt(
+      "Nome desta nova versão (ex.: Tom mais grave, Ao vivo, Simplificada):",
+      `Versão ${versoes.length + 1}`
+    );
+    if (rotulo === null) return; // cancelou
+
+    const copiarAtual =
+      textoExibido != null &&
+      window.confirm(
+        'Começar a partir do texto da versão atual (já com o tom/capo daqui) pra ajustar?\n\n"OK" copia o texto atual.\n"Cancelar" começa uma versão em branco.'
+      );
+
+    // Nunca grava cifra_cho vazio — uma versão sem nenhum conteúdo cai no
+    // mesmo caso de "essa versão ainda não tem cifra enviada" (pra PDFs que
+    // falharam no upload), então uma versão nova em branco já entra com o
+    // modelo mínimo, do mesmo jeito que abrirEdicao() faz
+    const cifraChoInicial = copiarAtual
+      ? textoExibido
+      : `{title: ${musica.nome}}\n{artist: ${musica.artista}}\n\n`;
+
+    const { data, error } = await supabase
+      .from("cifra_versoes")
+      .insert({
+        musica_id: id,
+        rotulo: rotulo.trim() || `Versão ${versoes.length + 1}`,
+        cifra_cho: cifraChoInicial,
+        ordem: versoes.length,
+      })
+      .select("id")
+      .single();
+
+    if (error) {
+      console.error(error);
+      window.alert("Não foi possível criar a versão. Tente de novo.");
+      return;
+    }
+
+    abrirEdicaoAoTrocarRef.current = true;
+    trocarVersao(data.id);
+  };
+
   // Grava um novo texto em cifra_cho — usado tanto por "Salvar tom" quanto
   // por mudar o capotraste e pelo modo de edição livre
   const salvarCifraCho = async (novoTexto) => {
+    if (!versaoId) return;
     setSalvandoTexto(true);
     setStatusEdicao("⏳ Salvando...");
-    const { error } = await supabase.from("musicas").update({ cifra_cho: novoTexto }).eq("id", id);
+    const { error } = await supabase
+      .from("cifra_versoes")
+      .update({ cifra_cho: novoTexto })
+      .eq("id", versaoId);
     if (error) {
       console.error(error);
       setStatusEdicao("❌ Erro ao salvar.");
     } else {
-      setMusica((m) => ({ ...m, cifra_cho: novoTexto }));
+      setVersoes((vs) => vs.map((v) => (v.id === versaoId ? { ...v, cifra_cho: novoTexto } : v)));
       setTransposicao(0); // já virou o novo "0" — a transposição foi incorporada ao texto
       setStatusEdicao("✅ Salvo!");
       setTimeout(() => setStatusEdicao(""), 2000);
@@ -754,13 +951,41 @@ export default function Cifra() {
           espaço que sobra num celular fica menor, num tablet fica maior. */}
       <header className="border-b border-noir-800 bg-noir-900/90 shrink-0 px-3 py-3 md:px-6 md:py-5">
         <div className="grid grid-cols-3 items-center gap-2 md:gap-4">
-          <div className="justify-self-start">
+          <div className="justify-self-start flex items-center flex-wrap gap-2">
             <Link
-              to="/admin?aba=cifras"
+              to={destinoVoltar(voltar)}
               className="shrink-0 h-14 md:h-20 px-4 md:px-6 flex items-center rounded-xl border border-noir-700 text-cream-muted text-base md:text-xl font-medium hover:text-gold-300 hover:border-gold-600 transition"
             >
               ‹ Voltar
             </Link>
+            {navItens && (idAnterior || idProximo) && (
+              <>
+                <Link
+                  to={idAnterior ? `/cifra/${idAnterior}?voltar=${voltar}` : "#"}
+                  aria-disabled={!idAnterior}
+                  onClick={(e) => !idAnterior && e.preventDefault()}
+                  className={`shrink-0 h-14 md:h-20 px-3 md:px-4 flex items-center rounded-xl border border-noir-700 text-sm md:text-lg font-medium transition ${
+                    idAnterior
+                      ? "text-cream-muted hover:text-gold-300 hover:border-gold-600"
+                      : "text-noir-700 pointer-events-none"
+                  }`}
+                >
+                  ‹ Anterior
+                </Link>
+                <Link
+                  to={idProximo ? `/cifra/${idProximo}?voltar=${voltar}` : "#"}
+                  aria-disabled={!idProximo}
+                  onClick={(e) => !idProximo && e.preventDefault()}
+                  className={`shrink-0 h-14 md:h-20 px-3 md:px-4 flex items-center rounded-xl border border-noir-700 text-sm md:text-lg font-medium transition ${
+                    idProximo
+                      ? "text-cream-muted hover:text-gold-300 hover:border-gold-600"
+                      : "text-noir-700 pointer-events-none"
+                  }`}
+                >
+                  Próxima ›
+                </Link>
+              </>
+            )}
           </div>
 
           {!erro && !modoEdicao && (
@@ -828,7 +1053,7 @@ export default function Cifra() {
           <button
             onClick={alternarRevisao}
             aria-label={revisaoId ? "Remover da revisão" : "Marcar para revisão"}
-            title={revisaoId ? "Em revisão — está na aba Aprender" : "Marcar para revisão"}
+            title={revisaoId ? "Em revisão — está na aba Revisão" : "Marcar para revisão"}
             className={`absolute left-1 shrink-0 transition ${
               revisaoId ? "text-gold-400" : "text-noir-600 hover:text-gold-300"
             }`}
@@ -857,6 +1082,31 @@ export default function Cifra() {
               </>
             )}
           </div>
+          {!modoEdicao && !erro?.startsWith("Música não encontrada") && (
+            <>
+              {versoes.length > 1 && (
+                <select
+                  value={versaoId ?? ""}
+                  onChange={(e) => trocarVersao(e.target.value)}
+                  aria-label="Versão da cifra"
+                  className="shrink-0 bg-noir-900 border border-noir-700 rounded-lg text-cream-muted text-xs md:text-sm px-2 py-1 max-w-[9rem] md:max-w-none"
+                >
+                  {versoes.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.rotulo}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <button
+                onClick={criarNovaVersao}
+                title="Criar uma nova versão desta cifra"
+                className="shrink-0 text-cream-muted hover:text-gold-300 text-xs md:text-sm border border-noir-700 hover:border-gold-600 rounded-lg px-2 py-1 transition"
+              >
+                + Versão
+              </button>
+            </>
+          )}
           <div className="absolute right-1 flex items-center gap-2 md:gap-3">
             {mostrarInfoRapida && !modoEdicao && (
               <span className="text-cream-muted/50 text-xs md:text-sm transition-opacity">
@@ -1013,6 +1263,7 @@ export default function Cifra() {
               }
               arraste.ativo = true;
               gestoOcorreuRef.current = true; // reaproveita a trava do onClick de play/pause
+              dispararBarraArraste();
             }
             // Arrastar até a metade da largura da tela cobre toda a faixa
             // MIN–MAX — pra direita aumenta (como segurar o "+"), pra
@@ -1021,6 +1272,7 @@ export default function Cifra() {
             const delta = Math.round((dx / alcance) * (VELOCIDADE_MAX - VELOCIDADE_MIN));
             const nova = Math.max(VELOCIDADE_MIN, Math.min(VELOCIDADE_MAX, arraste.velocidadeBase + delta));
             setVelocidade(nova);
+            dispararBarraArraste();
           }
         }}
         onTouchEnd={(e) => {
@@ -1096,6 +1348,25 @@ export default function Cifra() {
           </>
         )}
       </div>
+
+      {/* Barra de velocidade — aparece enquanto o dedo arrasta lateralmente
+          pra ajustar a velocidade, some sozinha ~2.5s depois de parar */}
+      {mostrarBarraArraste && !modoEdicao && (
+        <div
+          className="fixed left-1/2 bottom-10 -translate-x-1/2 z-20 flex items-center gap-2 pointer-events-none transition-opacity duration-300"
+        >
+          <span className="text-cream-muted text-sm">−</span>
+          <div className="relative w-40 h-1.5 rounded-full bg-noir-700">
+            <div
+              className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-4 h-4 rounded-full bg-gold-400 shadow"
+              style={{
+                left: `${((velocidade - VELOCIDADE_MIN) / (VELOCIDADE_MAX - VELOCIDADE_MIN)) * 100}%`,
+              }}
+            />
+          </div>
+          <span className="text-cream-muted text-sm">+</span>
+        </div>
+      )}
     </div>
   );
 }

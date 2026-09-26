@@ -194,7 +194,7 @@ const ABAS_OUTROS = [
   ["afinador", "Afinador"],
   ["agenda", "Agenda"],
   ["aprender", "Aprender"],
-  ["evento", "Playlist especial"],
+  ["revisao", "Revisão"],
   ["gorjeta", "Gorjeta"],
   ["musicas", "Músicas"],
   ["ocultar", "Ocultar"],
@@ -304,6 +304,7 @@ function Icone({ nome, className = "w-5 h-5" }) {
         </svg>
       );
     case "olho":
+    case "revisao":
       return (
         <svg {...props}>
           <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z" />
@@ -439,16 +440,19 @@ function Painel() {
   // Mapa nome→cifra, pro botão "Ver cifra" no pop-up de pedido novo (fica
   // disponível em qualquer aba, não só na de Pedidos)
   useEffect(() => {
-    supabase
-      .from("musicas")
-      .select("id, nome")
-      .or("cifra_path.not.is.null,cifra_cho.not.is.null")
-      .then(({ data, error }) => {
-        if (error) return;
-        const mapa = {};
-        for (const m of data ?? []) mapa[normalizarNome(m.nome)] = m.id;
-        setCifraPorNome(mapa);
-      });
+    (async () => {
+      const [{ data: ms, error }, { data: vs }] = await Promise.all([
+        supabase.from("musicas").select("id, nome"),
+        supabase.from("cifra_versoes").select("musica_id"),
+      ]);
+      if (error) return;
+      const idsComCifra = new Set((vs ?? []).map((v) => v.musica_id));
+      const mapa = {};
+      for (const m of (ms ?? []).filter((m) => idsComCifra.has(m.id))) {
+        mapa[normalizarNome(m.nome)] = m.id;
+      }
+      setCifraPorNome(mapa);
+    })();
   }, []);
 
   // "Músicas" sempre em primeiro; o resto, alfabético
@@ -590,13 +594,13 @@ function Painel() {
       {aba === "musicas" && <GerenciarMusicas />}
       {aba === "cifras" && <AbaCifras />}
       {aba === "aprender" && <GerenciarSugestoes />}
+      {aba === "revisao" && <GerenciarRevisao />}
       {aba === "agenda" && <GerenciarAgenda />}
-      {aba === "evento" && <AbaEventoCliente />}
       {aba === "afinador" && <Afinador />}
       {aba === "videos" && <GerenciarVideos />}
       {aba === "gorjeta" && <AbaGorjeta />}
       {aba === "ocultar" && <AbaOcultar />}
-      {aba === "playlists" && <AbaPlaylists />}
+      {aba === "playlists" && <AbaPlaylistsUnificado />}
       {aba === "pedidos" && (
         <GerenciarPedidos onMudanca={contarPendentes} cifraPorNome={cifraPorNome} />
       )}
@@ -694,6 +698,10 @@ function GerenciarMusicas() {
   const [enviandoCifraId, setEnviandoCifraId] = useState(null);
   const [filtroCifra, setFiltroCifra] = useState("todas"); // todas | com | sem
   const [musicaParaTrocarItunes, setMusicaParaTrocarItunes] = useState(null);
+  // Versões de cifra de cada música (musica_id -> lista, em ordem) e qual
+  // música está com o painel de versões aberto
+  const [versoesPorMusica, setVersoesPorMusica] = useState({});
+  const [versoesAbertasId, setVersoesAbertasId] = useState(null);
 
   // --- Checagem no iTunes (resultado fica salvo no navegador) ---
   const [filtroItunes, setFiltroItunes] = useState(false);
@@ -767,15 +775,25 @@ function GerenciarMusicas() {
 
   const carregar = async () => {
     setCarregando(true);
-    // Só as colunas que esta aba de fato usa — cifra_cho pode ter alguns KB
-    // de texto por música, e select("*") trazia isso (e mais) toda vez que
-    // a aba recarregava, mesmo só usando cifra_cho como booleano aqui
-    const { data, error } = await supabase
-      .from("musicas")
-      .select("id, nome, artista, estilo, cifra_path, cifra_paginas, cifra_versao, cifra_cho")
-      .order("nome")
-      .order("artista");
+    const [{ data, error }, { data: versoes, error: erroVersoes }] = await Promise.all([
+      supabase
+        .from("musicas")
+        .select("id, nome, artista, estilo, cifra_versao_padrao_id")
+        .order("nome")
+        .order("artista"),
+      // Só os campos leves — cifra_cho fica de fora (pode ter alguns KB de
+      // texto por versão, e essa lista roda toda vez que a aba recarrega)
+      supabase
+        .from("cifra_versoes")
+        .select("id, musica_id, rotulo, cifra_path, cifra_paginas, cifra_versao, ordem")
+        .order("ordem"),
+    ]);
     if (!error) setMusicas(data ?? []);
+    if (!erroVersoes) {
+      const porMusica = {};
+      for (const v of versoes ?? []) (porMusica[v.musica_id] ??= []).push(v);
+      setVersoesPorMusica(porMusica);
+    }
     setCarregando(false);
   };
 
@@ -823,30 +841,72 @@ function GerenciarMusicas() {
     setForm({ nome: "", artista: "", estilo: "" });
   };
 
-  // Lista todos os arquivos de uma cifra no Storage: o PDF original e as
-  // imagens pré-renderizadas de cada página (se existirem)
-  const arquivosDaCifra = (m) => {
+  // Lista todos os arquivos de uma versão de cifra no Storage: o PDF
+  // original e as imagens pré-renderizadas de cada página (se existirem)
+  const arquivosDaVersao = (v) => {
     const arquivos = [];
-    if (m.cifra_path) arquivos.push(m.cifra_path);
-    if (m.cifra_versao) {
-      for (let i = 1; i <= (m.cifra_paginas || 0); i++) {
-        arquivos.push(caminhoImagemPagina(m.id, m.cifra_versao, i));
+    if (v.cifra_path) arquivos.push(v.cifra_path);
+    if (v.cifra_versao) {
+      for (let i = 1; i <= (v.cifra_paginas || 0); i++) {
+        arquivos.push(caminhoImagemPagina(v.musica_id, v.cifra_versao, i));
       }
     }
     return arquivos;
   };
 
   const excluir = async (m) => {
-    if (!window.confirm(`Excluir "${m.nome} — ${m.artista}"?${m.cifra_path || m.cifra_cho ? "\nA cifra também será apagada." : ""}`)) return;
+    const versoes = versoesPorMusica[m.id] ?? [];
+    if (
+      !window.confirm(
+        `Excluir "${m.nome} — ${m.artista}"?${versoes.length > 0 ? "\nTodas as versões da cifra também serão apagadas." : ""}`
+      )
+    )
+      return;
     const { error } = await supabase.from("musicas").delete().eq("id", m.id);
     if (error) {
       console.error(error);
       setStatus("❌ Erro ao excluir.");
       return;
     }
-    const arquivos = arquivosDaCifra(m);
+    const arquivos = versoes.flatMap(arquivosDaVersao);
     if (arquivos.length > 0) {
       await supabase.storage.from("cifras").remove(arquivos);
+    }
+    carregar();
+  };
+
+  const excluirVersao = async (v, m) => {
+    if (!window.confirm(`Excluir a versão "${v.rotulo}"?`)) return;
+    const { error } = await supabase.from("cifra_versoes").delete().eq("id", v.id);
+    if (error) {
+      console.error(error);
+      setStatus("❌ Erro ao excluir a versão.");
+      return;
+    }
+    const arquivos = arquivosDaVersao(v);
+    if (arquivos.length > 0) {
+      await supabase.storage.from("cifras").remove(arquivos);
+    }
+    // Se era a versão padrão, escolhe outra restante como nova padrão
+    if (m.cifra_versao_padrao_id === v.id) {
+      const restante = (versoesPorMusica[m.id] ?? []).find((x) => x.id !== v.id);
+      await supabase
+        .from("musicas")
+        .update({ cifra_versao_padrao_id: restante?.id ?? null })
+        .eq("id", m.id);
+    }
+    carregar();
+  };
+
+  const tornarPadrao = async (v, m) => {
+    const { error } = await supabase
+      .from("musicas")
+      .update({ cifra_versao_padrao_id: v.id })
+      .eq("id", m.id);
+    if (error) {
+      console.error(error);
+      setStatus("❌ Erro ao definir a versão padrão.");
+      return;
     }
     carregar();
   };
@@ -876,6 +936,13 @@ function GerenciarMusicas() {
       setStatus("❌ Envie um arquivo PDF.");
       return;
     }
+
+    const versoesAtuais = versoesPorMusica[m.id] ?? [];
+    const rotulo = window.prompt(
+      "Nome desta versão (ex.: Tom original, Ao vivo, Simplificada):",
+      `Versão ${versoesAtuais.length + 1}`
+    );
+    if (rotulo === null) return; // cancelou
 
     setEnviandoCifraId(m.id);
     setStatus("⏳ Enviando cifra...");
@@ -938,32 +1005,30 @@ function GerenciarMusicas() {
       }
     }
 
-    // Vincula no banco ANTES de apagar os arquivos antigos do Storage — se
-    // o update falhar (ex.: sessão expirou no meio do upload), a música
-    // continua apontando pro cifra_path antigo, então ele precisa continuar
-    // existindo. A ordem inversa deixava a cifra quebrada (404) sempre que
-    // o update falhasse depois dos arquivos antigos já removidos.
-    const { error: dbError } = await supabase
-      .from("musicas")
-      .update({
+    const { data: novaVersao, error: dbError } = await supabase
+      .from("cifra_versoes")
+      .insert({
+        musica_id: m.id,
+        rotulo: rotulo.trim() || `Versão ${versoesAtuais.length + 1}`,
         cifra_path: path,
         cifra_paginas: totalPaginas || null,
         cifra_versao: versao,
-        cifra_cho: cifraCho, // null limpa uma conversão antiga se essa nova falhar
+        cifra_cho: cifraCho,
+        ordem: versoesAtuais.length,
       })
-      .eq("id", m.id);
+      .select("id")
+      .single();
 
     if (dbError) {
       console.error(dbError);
-      setStatus("❌ Erro ao vincular a cifra.");
+      setStatus("❌ Erro ao salvar a versão.");
       setEnviandoCifraId(null);
-      carregar();
       return;
     }
 
-    const arquivosAntigos = arquivosDaCifra(m);
-    if (arquivosAntigos.length > 0) {
-      await supabase.storage.from("cifras").remove(arquivosAntigos);
+    // Primeira versão da música vira a padrão automaticamente
+    if (versoesAtuais.length === 0) {
+      await supabase.from("musicas").update({ cifra_versao_padrao_id: novaVersao.id }).eq("id", m.id);
     }
 
     setStatus(
@@ -977,7 +1042,7 @@ function GerenciarMusicas() {
   };
 
   const visiveis = musicas.filter((m) => {
-    const temCifra = Boolean(m.cifra_path || m.cifra_cho);
+    const temCifra = (versoesPorMusica[m.id]?.length ?? 0) > 0;
     if (filtroCifra === "com" && !temCifra) return false;
     if (filtroCifra === "sem" && temCifra) return false;
     if (filtroItunes && itunesMap[chaveItunes(m)] !== false) return false;
@@ -993,7 +1058,7 @@ function GerenciarMusicas() {
       "Música": m.nome,
       "Artista": m.artista,
       "Estilo": m.estilo ?? "",
-      "Cifra": m.cifra_path || m.cifra_cho ? "Sim" : "",
+      "Cifra": (versoesPorMusica[m.id]?.length ?? 0) > 0 ? "Sim" : "",
     }));
     const ws = XLSX.utils.json_to_sheet(dados);
     ws["!cols"] = [{ wch: 40 }, { wch: 30 }, { wch: 16 }, { wch: 8 }];
@@ -1138,8 +1203,14 @@ function GerenciarMusicas() {
         <div className="flex gap-2 mb-2">
           {[
             ["todas", `Todas (${musicas.length})`],
-            ["com", `Com cifra (${musicas.filter((m) => m.cifra_path || m.cifra_cho).length})`],
-            ["sem", `Sem cifra (${musicas.filter((m) => !m.cifra_path && !m.cifra_cho).length})`],
+            [
+              "com",
+              `Com cifra (${musicas.filter((m) => (versoesPorMusica[m.id]?.length ?? 0) > 0).length})`,
+            ],
+            [
+              "sem",
+              `Sem cifra (${musicas.filter((m) => (versoesPorMusica[m.id]?.length ?? 0) === 0).length})`,
+            ],
           ].map(([valor, rotulo]) => (
             <button
               key={valor}
@@ -1186,7 +1257,7 @@ function GerenciarMusicas() {
         ) : (
           <ul className="divide-y divide-noir-800 max-h-[480px] overflow-y-auto pr-2">
             {visiveis.map((m) => (
-              <li key={m.id} className="py-3 flex items-center justify-between gap-3">
+              <li key={m.id} className="py-3 flex items-center justify-between gap-3 flex-wrap">
                 <BotaoOuvir nome={m.nome} artista={m.artista} />
                 <div className="min-w-0 flex-1">
                   <p className="text-cream truncate">
@@ -1207,13 +1278,9 @@ function GerenciarMusicas() {
                 </div>
                 <div className="flex gap-2 shrink-0 flex-wrap justify-end">
                   <label
-                    title={
-                      m.cifra_path
-                        ? "Trocar o PDF da cifra (converte pra ChordPro automaticamente)"
-                        : "Enviar PDF da cifra (converte pra ChordPro automaticamente)"
-                    }
+                    title="Enviar uma nova versão da cifra em PDF (converte pra ChordPro automaticamente)"
                     className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs transition cursor-pointer ${
-                      m.cifra_path
+                      (versoesPorMusica[m.id]?.length ?? 0) > 0
                         ? "border-gold-600 text-gold-300 hover:bg-noir-800"
                         : "border-noir-700 text-cream-muted hover:text-gold-300 hover:border-gold-600"
                     } ${enviandoCifraId === m.id ? "opacity-50 pointer-events-none" : ""}`}
@@ -1223,7 +1290,7 @@ function GerenciarMusicas() {
                     ) : (
                       <>
                         <Icone nome="anexo" className="w-3.5 h-3.5" />
-                        {m.cifra_path ? "Trocar PDF" : "PDF"}
+                        {(versoesPorMusica[m.id]?.length ?? 0) > 0 ? "Nova versão" : "PDF"}
                       </>
                     )}
                     <input
@@ -1236,6 +1303,14 @@ function GerenciarMusicas() {
                       }}
                     />
                   </label>
+                  {(versoesPorMusica[m.id]?.length ?? 0) > 0 && (
+                    <button
+                      onClick={() => setVersoesAbertasId((v) => (v === m.id ? null : m.id))}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-noir-700 text-xs text-cream-muted hover:text-gold-300 hover:border-gold-600 transition"
+                    >
+                      Versões ({versoesPorMusica[m.id].length})
+                    </button>
+                  )}
                   <button
                     onClick={() => setMusicaParaTrocarItunes(m)}
                     title="Buscar outro resultado no iTunes pra corrigir nome/artista/estilo"
@@ -1257,6 +1332,36 @@ function GerenciarMusicas() {
                     Excluir
                   </button>
                 </div>
+                {versoesAbertasId === m.id && (
+                  <ul className="basis-full mt-2 border border-noir-800 rounded-xl divide-y divide-noir-800">
+                    {(versoesPorMusica[m.id] ?? []).map((v) => (
+                      <li key={v.id} className="flex items-center gap-2 px-3 py-2">
+                        <span className="min-w-0 flex-1 truncate text-sm text-cream">
+                          {v.rotulo}
+                          {m.cifra_versao_padrao_id === v.id && (
+                            <span className="ml-2 text-[10px] uppercase tracking-wider text-gold-300 border border-gold-600 rounded-full px-2 py-0.5">
+                              padrão
+                            </span>
+                          )}
+                        </span>
+                        {m.cifra_versao_padrao_id !== v.id && (
+                          <button
+                            onClick={() => tornarPadrao(v, m)}
+                            className="px-2.5 py-1 rounded-lg border border-noir-700 text-[11px] text-cream-muted hover:text-gold-300 hover:border-gold-600 transition"
+                          >
+                            Tornar padrão
+                          </button>
+                        )}
+                        <button
+                          onClick={() => excluirVersao(v, m)}
+                          className="px-2.5 py-1 rounded-lg border border-noir-700 text-[11px] text-cream-muted hover:text-red-400 hover:border-red-900 transition"
+                        >
+                          Excluir
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </li>
             ))}
             {visiveis.length === 0 && (
@@ -1372,6 +1477,7 @@ function AbaCifras() {
   const [modalAberto, setModalAberto] = useState(false);
   const [armazenamentoPersistente, setArmazenamentoPersistente] = useState(null); // null = verificando
   const [soFavoritas, setSoFavoritas] = useState(false);
+  const [versoes, setVersoes] = useState([]); // todas as versões de cifra (de todas as músicas), pro download offline
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -1388,17 +1494,22 @@ function AbaCifras() {
       .catch(() => setArmazenamentoPersistente(false));
   }, []);
 
-  const carregar = () =>
-    supabase
-      .from("musicas")
-      .select("id, nome, artista, estilo, cifra_path, cifra_paginas, cifra_versao, cifra_cho, favorito")
-      .or("cifra_path.not.is.null,cifra_cho.not.is.null")
-      .order("nome")
-      .order("artista")
-      .then(({ data, error }) => {
-        if (!error) setMusicas(data ?? []);
-        setCarregando(false);
-      });
+  const carregar = async () => {
+    const [{ data, error }, { data: comVersao }] = await Promise.all([
+      supabase
+        .from("musicas")
+        .select("id, nome, artista, estilo, favorito")
+        .order("nome")
+        .order("artista"),
+      supabase.from("cifra_versoes").select("musica_id, cifra_path"),
+    ]);
+    if (!error) {
+      setVersoes(comVersao ?? []);
+      const idsComCifra = new Set((comVersao ?? []).map((v) => v.musica_id));
+      setMusicas((data ?? []).filter((m) => idsComCifra.has(m.id)));
+    }
+    setCarregando(false);
+  };
 
   useEffect(() => {
     carregar();
@@ -1420,9 +1531,15 @@ function AbaCifras() {
   });
 
   const cliqueBaixar = () => {
-    // Só cifras em PDF precisam de cache offline — as em .cho já vêm
-    // completas na própria linha da música, sem arquivo separado pra baixar
-    if (!progresso.baixando) baixarCifrasEmCache(musicas.filter((m) => m.cifra_path));
+    // Só versões em PDF precisam de cache offline — as em .cho já vêm
+    // completas no próprio registro, sem arquivo separado pra baixar
+    if (!progresso.baixando) {
+      const musicaPorId = new Map(musicas.map((m) => [m.id, m]));
+      const paraBaixar = versoes
+        .filter((v) => v.cifra_path && musicaPorId.has(v.musica_id))
+        .map((v) => ({ cifra_path: v.cifra_path, nome: musicaPorId.get(v.musica_id).nome }));
+      baixarCifrasEmCache(paraBaixar);
+    }
     setModalAberto(true);
   };
 
@@ -1632,7 +1749,6 @@ function GerenciarSugestoes() {
   const [form, setForm] = useState({ musica: "", artista: "", para: "Ambos" });
   const [status, setStatus] = useState("");
   const [filtroPara, setFiltroPara] = useState(() => new Set(OPCOES_PARA));
-  const [soRevisao, setSoRevisao] = useState(false);
   const [repertorio, setRepertorio] = useState(() => new Set());
   const [sugestaoParaMover, setSugestaoParaMover] = useState(null);
 
@@ -1682,7 +1798,11 @@ function GerenciarSugestoes() {
   const carregar = async () => {
     setCarregando(true);
     const [{ data, error }, { data: reps }] = await Promise.all([
-      supabase.from("sugestoes").select("*").order("created_at", { ascending: false }),
+      supabase
+        .from("sugestoes")
+        .select("*")
+        .neq("origem", "revisao")
+        .order("created_at", { ascending: false }),
       supabase.from("musicas").select("nome"),
     ]);
     if (!error) setSugestoes(data ?? []);
@@ -1769,20 +1889,6 @@ function GerenciarSugestoes() {
       setStatus("❌ Erro ao excluir.");
       return;
     }
-    carregar();
-  };
-
-  // A música em revisão já está no repertório — só sai da fila, sem passar
-  // pelo vínculo com o iTunes (isso já foi feito quando ela entrou)
-  const concluirRevisao = async (s) => {
-    const { error } = await supabase.from("sugestoes").delete().eq("id", s.id);
-    if (error) {
-      console.error(error);
-      setStatus("❌ Erro ao concluir a revisão.");
-      return;
-    }
-    setStatus(`✅ "${s.musica}" revisada!`);
-    setTimeout(() => setStatus(""), 2500);
     carregar();
   };
 
@@ -1895,18 +2001,6 @@ function GerenciarSugestoes() {
               {o} ({sugestoes.filter((s) => (s.para ?? "Ambos") === o).length})
             </button>
           ))}
-          <button
-            onClick={() => setSoRevisao((v) => !v)}
-            title="Mostrar só as músicas marcadas para revisão na tela da cifra"
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs tracking-wide transition border ${
-              soRevisao
-                ? "btn-gold border-transparent"
-                : "border-noir-700 text-cream-muted hover:text-cream"
-            }`}
-          >
-            <Icone nome="olho" className="w-3.5 h-3.5" />
-            Revisão ({sugestoes.filter((s) => s.origem === "revisao").length})
-          </button>
         </div>
 
         {carregando ? (
@@ -1915,7 +2009,6 @@ function GerenciarSugestoes() {
           <ul className="divide-y divide-noir-800 max-h-[480px] overflow-y-auto pr-2">
             {sugestoes
               .filter((s) => filtroPara.has(s.para ?? "Ambos"))
-              .filter((s) => !soRevisao || s.origem === "revisao")
               .map((s) => (
               <li key={s.id} className="py-3 flex items-center justify-between gap-3">
                 <div className="min-w-0">
@@ -1924,15 +2017,6 @@ function GerenciarSugestoes() {
                     {s.origem === "visitante" && (
                       <span className="ml-2 text-[10px] uppercase tracking-wider text-gold-300 border border-gold-600 rounded-full px-2 py-0.5">
                         público
-                      </span>
-                    )}
-                    {s.origem === "revisao" && (
-                      <span
-                        title="Marcada para revisão na tela da cifra"
-                        className="ml-2 text-[10px] uppercase tracking-wider text-violet-300 border border-violet-700 rounded-full px-2 py-0.5"
-                      >
-                        <Icone nome="olho" className="w-2.5 h-2.5 inline -mt-0.5 mr-0.5" />
-                        revisão
                       </span>
                     )}
                     {(s.para ?? "Ambos") !== "Ambos" && (
@@ -1956,14 +2040,7 @@ function GerenciarSugestoes() {
                   )}
                 </div>
                 <div className="flex gap-2 shrink-0">
-                  {s.origem === "revisao" ? (
-                    <button
-                      onClick={() => concluirRevisao(s)}
-                      className="px-3 py-1.5 rounded-lg border border-noir-700 text-xs text-cream-muted hover:text-gold-300 hover:border-gold-600 transition"
-                    >
-                      ✓ Revisada
-                    </button>
-                  ) : (s.para ?? "Ambos") === "Ambos" ? (
+                  {(s.para ?? "Ambos") === "Ambos" ? (
                     <>
                       <BotaoConfirma rotulo="Gabs" ok={s.ok_gabs} onClick={() => confirmar(s, "ok_gabs")} />
                       <BotaoConfirma rotulo="Mari" ok={s.ok_mari} onClick={() => confirmar(s, "ok_mari")} />
@@ -2004,6 +2081,104 @@ function GerenciarSugestoes() {
           onFechar={() => setSugestaoParaMover(null)}
           onConfirmar={confirmarMoverRepertorio}
         />
+      )}
+    </div>
+  );
+}
+
+/* ---------------- REVISÃO ---------------- */
+// Separada de "Aprender": músicas do repertório marcadas na tela da cifra
+// (ícone de olho) como precisando ser reensaiadas. Sem relação nenhuma com
+// as sugestões de músicas novas.
+function GerenciarRevisao() {
+  const navigate = useNavigate();
+  const [itens, setItens] = useState([]);
+  const [carregando, setCarregando] = useState(true);
+  const [status, setStatus] = useState("");
+
+  const carregar = async () => {
+    setCarregando(true);
+    const { data, error } = await supabase
+      .from("sugestoes")
+      .select("*")
+      .eq("origem", "revisao")
+      .order("created_at", { ascending: false });
+    if (!error) setItens(data ?? []);
+    setCarregando(false);
+  };
+
+  useEffect(() => {
+    carregar();
+  }, []);
+
+  const concluir = async (s) => {
+    const { error } = await supabase.from("sugestoes").delete().eq("id", s.id);
+    if (error) {
+      console.error(error);
+      setStatus("❌ Erro ao concluir a revisão.");
+      return;
+    }
+    setStatus(`✅ "${s.musica}" revisada!`);
+    setTimeout(() => setStatus(""), 2500);
+    carregar();
+  };
+
+  const excluir = async (s) => {
+    if (!window.confirm(`Remover "${s.musica}" da revisão?`)) return;
+    const { error } = await supabase.from("sugestoes").delete().eq("id", s.id);
+    if (error) {
+      console.error(error);
+      setStatus("❌ Erro ao excluir.");
+      return;
+    }
+    carregar();
+  };
+
+  return (
+    <div className="border border-noir-700 rounded-2xl p-5 bg-noir-900/50">
+      <h2 className="section-title text-sm mb-3">Em revisão ({itens.length})</h2>
+      {status && <p className="text-sm text-cream-muted mb-3">{status}</p>}
+
+      {carregando ? (
+        <p className="text-cream-muted text-sm py-4">Carregando...</p>
+      ) : (
+        <ul className="divide-y divide-noir-800">
+          {itens.map((s) => (
+            <li key={s.id} className="py-3 flex items-center justify-between gap-3">
+              <button
+                type="button"
+                disabled={!s.musica_id}
+                onClick={() => navigate(`/cifra/${s.musica_id}?voltar=revisao`)}
+                className="min-w-0 text-left disabled:cursor-default disabled:opacity-70"
+                title={s.musica_id ? "Abrir a cifra" : "Música não encontrada no repertório"}
+              >
+                <p className="text-cream truncate hover:text-gold-300 transition">{s.musica}</p>
+                <p className="text-cream-muted text-sm truncate">
+                  {s.artista || "Artista não informado"}
+                </p>
+              </button>
+              <div className="flex gap-2 shrink-0">
+                <button
+                  onClick={() => concluir(s)}
+                  className="px-3 py-1.5 rounded-lg border border-noir-700 text-xs text-cream-muted hover:text-gold-300 hover:border-gold-600 transition"
+                >
+                  ✓ Revisada
+                </button>
+                <button
+                  onClick={() => excluir(s)}
+                  className="px-3 py-1.5 rounded-lg border border-noir-700 text-xs text-cream-muted hover:text-red-400 hover:border-red-900 transition"
+                >
+                  Excluir
+                </button>
+              </div>
+            </li>
+          ))}
+          {itens.length === 0 && (
+            <li className="py-4 text-cream-muted text-sm">
+              Nenhuma música em revisão. Marque uma pelo ícone de olho na tela da cifra.
+            </li>
+          )}
+        </ul>
       )}
     </div>
   );
@@ -2507,6 +2682,165 @@ function GerenciarAgenda() {
   );
 }
 
+/* ------------------------- PLAYLISTS (unificado) ------------------------- */
+// Uma lista só, combinando as playlists do músico (roteiro interno) com as
+// playlists de evento (pedidos do contratante) — cada uma com um selo do
+// tipo. Escolher um item abre só o editor correspondente (AbaPlaylists ou
+// AbaEventoCliente, com a própria lista deles escondida via apenasEditor).
+function AbaPlaylistsUnificado() {
+  const [searchParams] = useSearchParams();
+  const abrirParam = searchParams.get("abrir"); // "playlist:<id>" | "evento:<id>"
+
+  const [resumo, setResumo] = useState([]); // { tipo: "musico"|"evento", id, titulo, contagem }
+  const [carregando, setCarregando] = useState(true);
+  const [filtro, setFiltro] = useState("todas"); // todas | musico | evento
+  const [selecionado, setSelecionado] = useState(() => {
+    if (abrirParam?.startsWith("evento:")) return { tipo: "evento", id: abrirParam.slice(7) };
+    if (abrirParam?.startsWith("playlist:")) return { tipo: "musico", id: abrirParam.slice(9) };
+    return null;
+  });
+  const [novoNome, setNovoNome] = useState("");
+  const [status, setStatus] = useState("");
+
+  const carregarResumo = async () => {
+    setCarregando(true);
+    const [{ data: pls }, { data: evs }, { data: pedidos }] = await Promise.all([
+      supabase.from("playlists").select("id, nome, itens, musicas_ids"),
+      supabase.from("eventos").select("id, titulo").order("data", { ascending: false }),
+      supabase.from("pedidos_evento").select("evento_id"),
+    ]);
+    const contagemEvento = {};
+    for (const p of pedidos ?? []) contagemEvento[p.evento_id] = (contagemEvento[p.evento_id] ?? 0) + 1;
+    const itens = [
+      ...(pls ?? [])
+        .map((p) => ({ tipo: "musico", id: p.id, titulo: p.nome, contagem: itensDaPlaylist(p).length }))
+        .sort((a, b) => a.titulo.localeCompare(b.titulo, "pt-BR")),
+      ...(evs ?? []).map((e) => ({
+        tipo: "evento",
+        id: e.id,
+        titulo: e.titulo,
+        contagem: contagemEvento[e.id] ?? 0,
+      })),
+    ];
+    setResumo(itens);
+    setCarregando(false);
+  };
+
+  useEffect(() => {
+    carregarResumo();
+  }, []);
+
+  const criarPlaylist = async (e) => {
+    e.preventDefault();
+    const nome = novoNome.trim();
+    if (!nome) return;
+    setStatus("⏳ Criando...");
+    const { data, error } = await supabase
+      .from("playlists")
+      .insert({ nome, itens: [] })
+      .select("id")
+      .single();
+    if (error) {
+      console.error(error);
+      setStatus("❌ Erro ao criar.");
+      return;
+    }
+    setStatus("");
+    setNovoNome("");
+    await carregarResumo();
+    setSelecionado({ tipo: "musico", id: data.id });
+  };
+
+  const visiveis = resumo.filter((r) => filtro === "todas" || r.tipo === filtro);
+  const rotuloTipo = (tipo) => (tipo === "evento" ? "Evento" : "Minha playlist");
+
+  return (
+    <div className="space-y-6">
+      <div className="border border-noir-700 rounded-2xl p-5 bg-noir-900/50">
+        <div className="flex items-center justify-between gap-4 mb-4 flex-wrap">
+          <h2 className="section-title text-sm">Playlists ({resumo.length})</h2>
+        </div>
+
+        <form onSubmit={criarPlaylist} className="flex gap-2 mb-4">
+          <input
+            className="input-noir"
+            placeholder="Nome da nova playlist (ex.: Repertório do show de sábado)"
+            value={novoNome}
+            onChange={(e) => setNovoNome(e.target.value)}
+          />
+          <button type="submit" className="btn-gold px-5 py-2.5 rounded-xl text-sm shrink-0">
+            Criar
+          </button>
+        </form>
+        {status && <p className="text-sm text-cream-muted mb-3">{status}</p>}
+
+        <div className="flex gap-2 mb-3">
+          {[
+            ["todas", `Todas (${resumo.length})`],
+            ["musico", `Minha playlist (${resumo.filter((r) => r.tipo === "musico").length})`],
+            ["evento", `Evento (${resumo.filter((r) => r.tipo === "evento").length})`],
+          ].map(([valor, rotulo]) => (
+            <button
+              key={valor}
+              onClick={() => setFiltro(valor)}
+              className={`px-3 py-1.5 rounded-full text-xs tracking-wide transition border ${
+                filtro === valor
+                  ? "btn-gold border-transparent"
+                  : "border-noir-700 text-cream-muted hover:text-cream"
+              }`}
+            >
+              {rotulo}
+            </button>
+          ))}
+        </div>
+
+        {carregando ? (
+          <p className="text-cream-muted text-sm py-4">Carregando...</p>
+        ) : (
+          <ul className="divide-y divide-noir-800 max-h-96 overflow-y-auto pr-2">
+            {visiveis.map((r) => (
+              <li key={`${r.tipo}-${r.id}`} className="py-3 flex items-center justify-between gap-3">
+                <button
+                  onClick={() => setSelecionado({ tipo: r.tipo, id: r.id })}
+                  className={`min-w-0 flex-1 text-left ${
+                    selecionado?.tipo === r.tipo && selecionado?.id === r.id
+                      ? "text-gold-300"
+                      : "text-cream hover:text-gold-300"
+                  } transition`}
+                >
+                  <p className="truncate flex items-center gap-2">
+                    {r.titulo}
+                    <span
+                      className={`shrink-0 text-[10px] uppercase tracking-wider rounded-full px-2 py-0.5 border ${
+                        r.tipo === "evento"
+                          ? "text-violet-300 border-violet-700"
+                          : "text-gold-300 border-gold-700"
+                      }`}
+                    >
+                      {rotuloTipo(r.tipo)}
+                    </span>
+                  </p>
+                  <p className="text-cream-muted text-xs mt-0.5">{r.contagem} música(s)</p>
+                </button>
+              </li>
+            ))}
+            {visiveis.length === 0 && (
+              <li className="py-4 text-cream-muted text-sm">Nenhuma playlist.</li>
+            )}
+          </ul>
+        )}
+      </div>
+
+      {selecionado?.tipo === "musico" && (
+        <AbaPlaylists key={`musico-${selecionado.id}`} playlistInicialId={selecionado.id} apenasEditor />
+      )}
+      {selecionado?.tipo === "evento" && (
+        <AbaEventoCliente key={`evento-${selecionado.id}`} eventoInicialId={selecionado.id} apenasEditor />
+      )}
+    </div>
+  );
+}
+
 /* ------------------------- PLAYLIST DE EVENTO ------------------------- */
 // Senha compartilhada (mesma pra todos os contratantes) + visão/moderação
 // das músicas que cada evento recebeu na página pública /evento.
@@ -2514,7 +2848,7 @@ function GerenciarAgenda() {
 // usada para saber se uma música pedida já é do repertório do duo
 const chaveRepertorio = (nome, artista) => `${normalizarNome(nome)}|${normalizarNome(artista)}`;
 
-function AbaEventoCliente() {
+function AbaEventoCliente({ eventoInicialId = null, apenasEditor = false }) {
   const navigate = useNavigate();
   const [eventos, setEventos] = useState([]);
   const [contagens, setContagens] = useState({}); // evento_id -> quantidade de músicas
@@ -2572,6 +2906,15 @@ function AbaEventoCliente() {
     carregarEventos();
   }, []);
 
+  // Abre automaticamente o evento pedido pela URL (?abrir=evento:<id>), ex.:
+  // vindo do botão Voltar da tela da cifra
+  useEffect(() => {
+    if (!eventoInicialId || eventoAbertoId) return;
+    const ev = eventos.find((e) => e.id === eventoInicialId);
+    if (ev) abrirEvento(ev);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eventoInicialId, eventos]);
+
   // Sem caracteres ambíguos (0/O, 1/I/L) — mais fácil de ditar por telefone
   const gerarSenha = () => {
     const alfabeto = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -2610,11 +2953,26 @@ function AbaEventoCliente() {
     setCarregandoMusicas(true);
     const { data, error } = await supabase
       .from("pedidos_evento")
-      .select("id, nome, artista, capa, preview_url, created_at, musica_id")
+      .select("id, nome, artista, capa, preview_url, created_at, musica_id, ordem")
       .eq("evento_id", ev.id)
-      .order("created_at");
+      .order("ordem", { ascending: true, nullsFirst: false })
+      .order("created_at", { ascending: true });
     if (!error) setMusicasEvento(data ?? []);
     setCarregandoMusicas(false);
+  };
+
+  // Persiste a nova ordem — reatribui a ordem de TODA a lista (não só do par
+  // trocado), pra não deixar pedidos antigos (sem "ordem" ainda) misturados
+  // com uma numeração parcial na próxima vez que a lista carregar
+  const moverPedido = async (indice, direcao) => {
+    const alvo = indice + direcao;
+    if (alvo < 0 || alvo >= musicasEvento.length) return;
+    const nova = [...musicasEvento];
+    [nova[indice], nova[alvo]] = [nova[alvo], nova[indice]];
+    setMusicasEvento(nova);
+    await Promise.all(
+      nova.map((m, i) => supabase.from("pedidos_evento").update({ ordem: i }).eq("id", m.id))
+    );
   };
 
   // Cada ação retorna true/false (não lança) — o modal usa isso pra
@@ -2675,48 +3033,50 @@ function AbaEventoCliente() {
   return (
     <div className="space-y-6">
       {/* Eventos e suas playlists */}
-      <div className="border border-noir-700 rounded-2xl p-5 bg-noir-900/50">
-        <h2 className="section-title text-sm mb-1">Playlists por evento</h2>
-        <p className="text-xs text-cream-muted mb-4">
-          Cada show tem sua própria senha — abra o evento abaixo pra ver ou
-          trocar a senha que você passa pra quem contratou.
-        </p>
-        {carregandoEventos ? (
-          <p className="text-cream-muted text-sm py-4">Carregando...</p>
-        ) : eventos.length === 0 ? (
-          <p className="text-cream-muted text-sm py-4">Nenhum show cadastrado ainda.</p>
-        ) : (
-          <ul className="divide-y divide-noir-800 max-h-[320px] overflow-y-auto pr-2">
-            {eventos.map((ev) => (
-              <li key={ev.id} className="py-3">
-                <button
-                  onClick={() => abrirEvento(ev)}
-                  className={`min-w-0 w-full text-left ${
-                    eventoAbertoId === ev.id ? "text-gold-300" : "text-cream hover:text-gold-300"
-                  } transition`}
-                >
-                  <p className="truncate flex items-center gap-2">
-                    {ev.titulo}
-                    <span
-                      className={`shrink-0 text-[10px] uppercase tracking-wider rounded-full px-2 py-0.5 border ${
-                        ev.senha
-                          ? "text-gold-300 border-gold-700"
-                          : "text-cream-muted border-noir-600"
-                      }`}
-                    >
-                      {ev.senha ? "🔓 com senha" : "🔒 sem senha"}
-                    </span>
-                  </p>
-                  <p className="text-cream-muted text-xs mt-0.5">
-                    {formatarDataCurta(ev.data)}
-                    {ev.local ? ` • ${ev.local}` : ""} • {contagens[ev.id] ?? 0} música(s) pedida(s)
-                  </p>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+      {!apenasEditor && (
+        <div className="border border-noir-700 rounded-2xl p-5 bg-noir-900/50">
+          <h2 className="section-title text-sm mb-1">Playlists por evento</h2>
+          <p className="text-xs text-cream-muted mb-4">
+            Cada show tem sua própria senha — abra o evento abaixo pra ver ou
+            trocar a senha que você passa pra quem contratou.
+          </p>
+          {carregandoEventos ? (
+            <p className="text-cream-muted text-sm py-4">Carregando...</p>
+          ) : eventos.length === 0 ? (
+            <p className="text-cream-muted text-sm py-4">Nenhum show cadastrado ainda.</p>
+          ) : (
+            <ul className="divide-y divide-noir-800 max-h-[320px] overflow-y-auto pr-2">
+              {eventos.map((ev) => (
+                <li key={ev.id} className="py-3">
+                  <button
+                    onClick={() => abrirEvento(ev)}
+                    className={`min-w-0 w-full text-left ${
+                      eventoAbertoId === ev.id ? "text-gold-300" : "text-cream hover:text-gold-300"
+                    } transition`}
+                  >
+                    <p className="truncate flex items-center gap-2">
+                      {ev.titulo}
+                      <span
+                        className={`shrink-0 text-[10px] uppercase tracking-wider rounded-full px-2 py-0.5 border ${
+                          ev.senha
+                            ? "text-gold-300 border-gold-700"
+                            : "text-cream-muted border-noir-600"
+                        }`}
+                      >
+                        {ev.senha ? "🔓 com senha" : "🔒 sem senha"}
+                      </span>
+                    </p>
+                    <p className="text-cream-muted text-xs mt-0.5">
+                      {formatarDataCurta(ev.data)}
+                      {ev.local ? ` • ${ev.local}` : ""} • {contagens[ev.id] ?? 0} música(s) pedida(s)
+                    </p>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       {eventoAberto && (
         <div className="border border-noir-700 rounded-2xl p-5 bg-noir-900/50">
@@ -2815,8 +3175,9 @@ function AbaEventoCliente() {
                   })
                   .map((m) => {
                     const noRepertorio = !!resolverMusicaId(m);
+                    const indiceReal = musicasEvento.indexOf(m);
                     return (
-                      <li key={m.id} className="py-3 flex items-center gap-3">
+                      <li key={m.id} className="py-3 flex items-center gap-2">
                         <BotaoOuvir url={m.preview_url} />
                         <button
                           onClick={() => setModalMusicaId(m.id)}
@@ -2836,6 +3197,22 @@ function AbaEventoCliente() {
                           </p>
                           <p className="text-cream-muted text-sm truncate">{m.artista}</p>
                         </button>
+                        <button
+                          onClick={() => moverPedido(indiceReal, -1)}
+                          disabled={indiceReal === 0}
+                          aria-label="Mover para cima"
+                          className="shrink-0 w-7 h-7 rounded-md border border-noir-700 text-cream-muted text-xs hover:text-gold-300 hover:border-gold-600 transition disabled:opacity-30 disabled:pointer-events-none"
+                        >
+                          ↑
+                        </button>
+                        <button
+                          onClick={() => moverPedido(indiceReal, 1)}
+                          disabled={indiceReal === musicasEvento.length - 1}
+                          aria-label="Mover para baixo"
+                          className="shrink-0 w-7 h-7 rounded-md border border-noir-700 text-cream-muted text-xs hover:text-gold-300 hover:border-gold-600 transition disabled:opacity-30 disabled:pointer-events-none"
+                        >
+                          ↓
+                        </button>
                       </li>
                     );
                   })}
@@ -2851,6 +3228,7 @@ function AbaEventoCliente() {
           resolvedId={resolverMusicaId(modalMusica)}
           repertorio={repertorio}
           navigate={navigate}
+          voltar={`evento:${eventoAbertoId}`}
           onFechar={() => setModalMusicaId(null)}
           onAdicionar={adicionarAoRepertorio}
           onLinkar={linkarMusica}
@@ -2863,7 +3241,17 @@ function AbaEventoCliente() {
 
 // Ação sobre um pedido de evento: adicionar ao repertório, linkar com uma
 // música já cadastrada (grafia diferente), ir pra cifra ou remover
-function ModalAcaoMusicaEvento({ musica, resolvedId, repertorio, navigate, onFechar, onAdicionar, onLinkar, onRemover }) {
+function ModalAcaoMusicaEvento({
+  musica,
+  resolvedId,
+  repertorio,
+  navigate,
+  voltar,
+  onFechar,
+  onAdicionar,
+  onLinkar,
+  onRemover,
+}) {
   const [etapa, setEtapa] = useState("menu"); // menu | linkar
   const [buscaLink, setBuscaLink] = useState("");
   const [processando, setProcessando] = useState(false);
@@ -2927,7 +3315,7 @@ function ModalAcaoMusicaEvento({ musica, resolvedId, repertorio, navigate, onFec
               Linkar com música existente
             </button>
             <button
-              onClick={() => resolvedId && navigate(`/cifra/${resolvedId}`)}
+              onClick={() => resolvedId && navigate(`/cifra/${resolvedId}?voltar=${voltar}`)}
               disabled={!resolvedId}
               className="w-full text-left px-4 py-3 rounded-xl border border-noir-700 text-cream hover:bg-noir-800 transition disabled:opacity-40"
             >
@@ -3542,7 +3930,8 @@ function AbaOcultar() {
 const itensDaPlaylist = (p) =>
   p.itens?.length ? p.itens : (p.musicas_ids ?? []).map((id) => ({ musica_id: id }));
 
-function AbaPlaylists() {
+function AbaPlaylists({ playlistInicialId = null, apenasEditor = false }) {
+  const navigate = useNavigate();
   const [musicas, setMusicas] = useState([]);
   const [playlists, setPlaylists] = useState([]);
   const [carregando, setCarregando] = useState(true);
@@ -3582,6 +3971,15 @@ function AbaPlaylists() {
   const musicaPorId = new Map(musicas.map((m) => [m.id, m]));
   const playlistAberta = playlists.find((p) => p.id === abertaId) ?? null;
   const itensAbertos = playlistAberta ? itensDaPlaylist(playlistAberta) : [];
+
+  // Abre automaticamente a playlist pedida pela URL (?abrir=playlist:<id>),
+  // ex.: vindo do botão Voltar da tela da cifra
+  useEffect(() => {
+    if (!playlistInicialId || abertaId) return;
+    const p = playlists.find((x) => x.id === playlistInicialId);
+    if (p) abrirPlaylist(p);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playlistInicialId, playlists]);
 
   const abrirPlaylist = (p) => {
     setAbertaId(p.id);
@@ -3730,6 +4128,7 @@ function AbaPlaylists() {
   return (
     <div className="space-y-6">
       {/* Playlists salvas */}
+      {!apenasEditor && (
       <div className="border border-noir-700 rounded-2xl p-5 bg-noir-900/50">
         <h2 className="section-title text-sm mb-4">Playlists ({playlists.length})</h2>
 
@@ -3783,6 +4182,7 @@ function AbaPlaylists() {
           </ul>
         )}
       </div>
+      )}
 
       {/* Editor da playlist aberta */}
       {playlistAberta && (
@@ -3833,17 +4233,29 @@ function AbaPlaylists() {
                       {i + 1}.
                     </span>
                     <BotaoOuvir nome={info.nome} artista={info.artista} />
-                    <span className="min-w-0 flex-1 truncate text-sm text-cream">
-                      {info.artista ? `${info.nome} — ${info.artista}` : info.nome}
-                      {info.extra && (
-                        <span
-                          title="Música avulsa — não está no repertório"
-                          className="ml-2 text-[10px] uppercase tracking-wider text-gold-300 border border-gold-700 rounded-full px-2 py-0.5"
-                        >
-                          fora do repertório
-                        </span>
-                      )}
-                    </span>
+                    {item.musica_id ? (
+                      <button
+                        onClick={() =>
+                          navigate(`/cifra/${item.musica_id}?voltar=playlist:${playlistAberta.id}`)
+                        }
+                        title="Abrir a cifra"
+                        className="min-w-0 flex-1 truncate text-sm text-cream text-left hover:text-gold-300 transition"
+                      >
+                        {info.artista ? `${info.nome} — ${info.artista}` : info.nome}
+                      </button>
+                    ) : (
+                      <span className="min-w-0 flex-1 truncate text-sm text-cream">
+                        {info.artista ? `${info.nome} — ${info.artista}` : info.nome}
+                        {info.extra && (
+                          <span
+                            title="Música avulsa — não está no repertório"
+                            className="ml-2 text-[10px] uppercase tracking-wider text-gold-300 border border-gold-700 rounded-full px-2 py-0.5"
+                          >
+                            fora do repertório
+                          </span>
+                        )}
+                      </span>
+                    )}
                     <button
                       onClick={() => moverItem(i, -1)}
                       disabled={i === 0 || salvandoOrdem}
