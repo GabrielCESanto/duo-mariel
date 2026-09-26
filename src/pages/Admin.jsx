@@ -2095,21 +2095,32 @@ function GerenciarRevisao() {
   const [itens, setItens] = useState([]);
   const [carregando, setCarregando] = useState(true);
   const [status, setStatus] = useState("");
+  // Repertório inteiro, pra resolver o musica_id por nome quando a sugestão
+  // é antiga (marcada antes da coluna musica_id existir) ou o vínculo não
+  // foi salvo por algum motivo — sem isso o clique na música ficava travado
+  const [repertorio, setRepertorio] = useState([]);
 
   const carregar = async () => {
     setCarregando(true);
-    const { data, error } = await supabase
-      .from("sugestoes")
-      .select("*")
-      .eq("origem", "revisao")
-      .order("created_at", { ascending: false });
+    const [{ data, error }, { data: reps }] = await Promise.all([
+      supabase
+        .from("sugestoes")
+        .select("*")
+        .eq("origem", "revisao")
+        .order("created_at", { ascending: false }),
+      supabase.from("musicas").select("id, nome"),
+    ]);
     if (!error) setItens(data ?? []);
+    setRepertorio(reps ?? []);
     setCarregando(false);
   };
 
   useEffect(() => {
     carregar();
   }, []);
+
+  const resolverMusicaId = (s) =>
+    s.musica_id ?? repertorio.find((m) => normalizarNome(m.nome) === normalizarNome(s.musica))?.id ?? null;
 
   const concluir = async (s) => {
     const { error } = await supabase.from("sugestoes").delete().eq("id", s.id);
@@ -2143,14 +2154,16 @@ function GerenciarRevisao() {
         <p className="text-cream-muted text-sm py-4">Carregando...</p>
       ) : (
         <ul className="divide-y divide-noir-800">
-          {itens.map((s) => (
+          {itens.map((s) => {
+            const musicaId = resolverMusicaId(s);
+            return (
             <li key={s.id} className="py-3 flex items-center justify-between gap-3">
               <button
                 type="button"
-                disabled={!s.musica_id}
-                onClick={() => navigate(`/cifra/${s.musica_id}?voltar=revisao`)}
+                disabled={!musicaId}
+                onClick={() => navigate(`/cifra/${musicaId}?voltar=revisao`)}
                 className="min-w-0 text-left disabled:cursor-default disabled:opacity-70"
-                title={s.musica_id ? "Abrir a cifra" : "Música não encontrada no repertório"}
+                title={musicaId ? "Abrir a cifra" : "Música não encontrada no repertório"}
               >
                 <p className="text-cream truncate hover:text-gold-300 transition">{s.musica}</p>
                 <p className="text-cream-muted text-sm truncate">
@@ -2172,7 +2185,8 @@ function GerenciarRevisao() {
                 </button>
               </div>
             </li>
-          ))}
+            );
+          })}
           {itens.length === 0 && (
             <li className="py-4 text-cream-muted text-sm">
               Nenhuma música em revisão. Marque uma pelo ícone de olho na tela da cifra.
